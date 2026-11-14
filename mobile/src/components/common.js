@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
+  Image,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useAuth } from '../auth/AuthContext';
+import { resolveImageUrl } from '../../api';
 
 export const colors = {
   ink: '#173a43',
@@ -153,6 +155,7 @@ export function ListingCard({ item, actions, detail }) {
     : item.salePrice || item.expectedPrice;
   return (
     <Card>
+      <ListingPhoto item={item} />
       <View style={styles.listingHeading}>
         <Text style={styles.listingName}>{item.fishType || 'Fish catch'}</Text>
         <Text style={styles.badge}>{item.saleMode === 'bid' ? 'AUCTION' : 'FIXED PRICE'}</Text>
@@ -167,6 +170,25 @@ export function ListingCard({ item, actions, detail }) {
       {actions ? <View style={styles.actions}>{actions}</View> : null}
     </Card>
   );
+}
+
+function ListingPhoto({ item }) {
+  const uri = resolveImageUrl(item?.imageUrl);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => setImageError(false), [uri]);
+
+  return uri && !imageError
+    ? <Image
+      accessibilityLabel={`${item.fishType || 'Catch'} photo`}
+      onError={() => setImageError(true)}
+      resizeMode="cover"
+      source={{ uri }}
+      style={styles.listingPhoto}
+    />
+    : <View accessibilityLabel={item?.imageUrl ? 'Catch photo unavailable' : 'No catch photo provided'} style={styles.listingPhotoPlaceholder}>
+      <Text style={styles.photoPlaceholderText}>{item?.imageUrl ? 'Photo unavailable' : 'No catch photo provided'}</Text>
+    </View>;
 }
 
 export function money(value) {
@@ -225,6 +247,9 @@ const styles = StyleSheet.create({
   listingMeta: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   listingPrice: { color: colors.coral, fontSize: 19, fontWeight: '800' },
   listingUnit: { color: colors.muted, fontSize: 11, fontWeight: '600' },
+  listingPhoto: { width: '100%', height: 170, borderRadius: 10, backgroundColor: colors.pale },
+  listingPhotoPlaceholder: { minHeight: 90, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.pale },
+  photoPlaceholderText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
   listingDetail: { color: colors.ink, fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 3 }
 });

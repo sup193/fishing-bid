@@ -23,7 +23,13 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TideMarket needs access to your photos so you can add catch images to listings."
+        }
+      ]
     ]
   }
 }

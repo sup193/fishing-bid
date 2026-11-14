@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, Stat, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
 
@@ -12,7 +13,8 @@ const blankListing = {
   price: '',
   description: '',
   minimumIncrement: '10',
-  durationHours: '24'
+  durationHours: '24',
+  imageUrl: ''
 };
 
 export function FishermanInventoryScreen() {
@@ -23,6 +25,8 @@ export function FishermanInventoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -47,11 +51,51 @@ export function FishermanInventoryScreen() {
     setForm(current => ({ ...current, [key]: value }));
   }
 
+  async function choosePhoto() {
+    setError('');
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError('Allow photo-library access to add a catch photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.85
+      });
+      if (result.canceled) return;
+
+      const photo = result.assets?.[0];
+      if (!photo?.uri) throw new Error('The selected photo could not be read.');
+
+      setSelectedPhoto(photo);
+      updateField('imageUrl', '');
+      setImageUploading(true);
+      try {
+        const uploaded = await mobileApi.uploadImage(photo);
+        updateField('imageUrl', uploaded.imageUrl);
+      } catch (uploadError) {
+        setError(uploadError.message);
+      } finally {
+        setImageUploading(false);
+      }
+    } catch (pickerError) {
+      setError(`Could not open your photo library: ${pickerError.message}`);
+    }
+  }
+
   async function publishListing() {
     const quantity = Number(form.quantity);
     const price = Number(form.price);
     if (!form.fishType.trim() || !form.location.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) {
       setError('Enter the fish type, a positive quantity and price, and the landing port.');
+      return;
+    }
+    if (!form.imageUrl) {
+      setError('Choose and upload a catch photo before publishing.');
       return;
     }
     if (saleMode === 'bid' && (!Number(form.durationHours) || Number(form.durationHours) <= 0 || !Number(form.minimumIncrement) || Number(form.minimumIncrement) <= 0)) {
@@ -72,7 +116,8 @@ export function FishermanInventoryScreen() {
         expectedPrice: price,
         salePrice: price,
         saleMode,
-        description: form.description.trim()
+        description: form.description.trim(),
+        imageUrl: form.imageUrl
       });
       if (saleMode === 'bid') {
         try {
@@ -91,6 +136,7 @@ export function FishermanInventoryScreen() {
       }
       setMessage(saleMode === 'bid' ? 'Auction listing published.' : 'Fixed-price listing published.');
       setForm(blankListing);
+      setSelectedPhoto(null);
       setShowForm(false);
       await load();
     } catch (publishError) {
@@ -147,7 +193,7 @@ export function FishermanInventoryScreen() {
         <Stat label="Active listings" value={activeListings} />
         <Stat label="Open auctions" value={activeAuctions} />
       </View>
-      <Button label="＋ Post a catch" onPress={() => { setSaleMode('sale'); setForm(blankListing); setError(''); setShowForm(true); }} />
+      <Button label="＋ Post a catch" onPress={() => { setSaleMode('sale'); setForm(blankListing); setSelectedPhoto(null); setError(''); setShowForm(true); }} />
       {loading ? <Loading label="Loading your catches…" /> : !listings.length ? <Empty>Your inventory is empty. Post your first catch to offer it to buyers.</Empty> : listings.map(item => (
         <ListingCard
           key={item.id}
@@ -170,6 +216,10 @@ export function FishermanInventoryScreen() {
             <Field label="Quantity (kg)" value={form.quantity} onChangeText={value => updateField('quantity', value)} placeholder="e.g. 25" keyboardType="decimal-pad" autoCapitalize="none" />
             <Field label={saleMode === 'bid' ? 'Starting bid per kg (₹)' : 'Price per kg (₹)'} value={form.price} onChangeText={value => updateField('price', value)} placeholder="e.g. 380" keyboardType="decimal-pad" autoCapitalize="none" />
             <Field label="Landing port" value={form.location} onChangeText={value => updateField('location', value)} placeholder="e.g. Mangalore" />
+            {selectedPhoto?.uri
+              ? <Image accessibilityLabel="Selected catch photo preview" source={{ uri: selectedPhoto.uri }} resizeMode="cover" style={styles.photoPreview} />
+              : <View style={styles.photoPlaceholder}><Text style={styles.photoPlaceholderText}>Add a photo of this catch</Text></View>}
+            <Button label={imageUploading ? 'Uploading photo…' : selectedPhoto ? 'Choose another photo' : 'Choose catch photo'} onPress={choosePhoto} loading={imageUploading} variant="secondary" />
             <Field label="Seller-reported quality" value={form.quality} onChangeText={value => updateField('quality', value)} placeholder="e.g. Premium" />
             <Field label="Size" value={form.size} onChangeText={value => updateField('size', value)} placeholder="e.g. Medium" />
             {saleMode === 'bid' ? <>
@@ -180,7 +230,7 @@ export function FishermanInventoryScreen() {
             {error ? <Notice>{error}</Notice> : null}
             <View style={styles.formActions}>
               <Button label="Cancel" variant="secondary" onPress={() => setShowForm(false)} />
-              <Button label="Publish listing" onPress={publishListing} loading={submitting} />
+              <Button label="Publish listing" onPress={publishListing} loading={submitting} disabled={imageUploading || !form.imageUrl} />
             </View>
           </Card>
         </Page>
@@ -284,6 +334,9 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   chips: { gap: 8, paddingVertical: 2 },
   formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 9, marginTop: 4 },
+  photoPreview: { width: '100%', height: 190, borderRadius: 10, backgroundColor: colors.pale },
+  photoPlaceholder: { minHeight: 90, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.pale },
+  photoPlaceholderText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
   orderTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   orderMeta: { color: colors.muted, fontSize: 11 }
 });

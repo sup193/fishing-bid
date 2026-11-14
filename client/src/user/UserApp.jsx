@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowUpRight, BadgeCheck, BarChart3, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, ReceiptText, Search, ShoppingBag, Sparkles, Waves } from 'lucide-react';
 import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
-import { sampleImageFor } from '../fishImages.js';
+import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
 
 const viewFromHash = () => {
@@ -28,6 +28,32 @@ function listingImage(item) {
   const image = sampleImageFor(item);
   if (image) return image;
   return categories.find(category => category.name === categoryFor(item))?.image || '/images/category-fish.svg';
+}
+
+function fallbackListingImage(item) {
+  return sampleImageForFishType(item?.fishType)
+    || categories.find(category => category.name === categoryFor(item))?.image
+    || '/images/category-fish.svg';
+}
+
+function ListingPhoto({ item, className, alt }) {
+  const source = listingImage(item);
+  const fallback = fallbackListingImage(item);
+  const genericFallback = '/images/category-fish.svg';
+  const [imageSource, setImageSource] = useState(source);
+
+  useEffect(() => setImageSource(source), [source]);
+
+  const useFallback = () => {
+    setImageSource(current => current === fallback ? genericFallback : fallback);
+  };
+
+  return <img
+    className={className}
+    src={imageSource}
+    alt={alt}
+    onError={imageSource === genericFallback ? undefined : useFallback}
+  />;
 }
 
 const itemPrice = item => Number(item.saleMode === 'bid'
@@ -71,10 +97,9 @@ function FishCard({ item, onSelect, onBid, isWishlisted, onToggleWishlist, now }
   const auction = item.saleMode === 'bid';
   const price = itemPrice(item);
   const guide = priceGuide(item);
-  const image = listingImage(item);
   return <article className="market-product-card">
     <div className="market-product-visual">
-      <img className="market-product-image" src={image} alt={item.imageUrl ? `${item.fishType} catch` : `${item.fishType} sample image`} />
+      <ListingPhoto className="market-product-image" item={item} alt={item.imageUrl ? `${item.fishType} catch` : `${item.fishType} sample image`} />
       <span className={`market-product-mode${auction && !closed ? ' is-live' : ''}`}>{auction ? closed ? 'Auction ended' : 'Live auction' : 'Fixed price'}</span>
       <button className={`wishlist-button${isWishlisted ? ' is-saved' : ''}`} aria-label={isWishlisted ? `Remove ${item.fishType} from wishlist` : `Add ${item.fishType} to wishlist`} aria-pressed={isWishlisted} onClick={() => onToggleWishlist(item.id)}><Heart size={18} fill={isWishlisted ? 'currentColor' : 'none'} /></button>
     </div>
@@ -579,7 +604,7 @@ export default function UserApp({ user, onAuth }) {
           {!buyerHistoryLoading && !buyerHistoryError && recommendedItems.length === 0 && <p className="empty recommendation-message">No available catches match these preferences. Try another category or a higher budget.</p>}
           <p className="recommendation-note">These are preference-based suggestions, not food-safety or freshness assessments.</p>
         </section>}
-        {message && <p className={messageType === 'error' ? 'notice' : 'success-notice'}>{message}</p>}
+        {message && !selected && <p className={messageType === 'error' ? 'notice' : 'success-notice'}>{message}</p>}
         <section className="market-listing-section" aria-labelledby="fresh-catch-title">
           <div className="market-section-title"><div><p className="kicker">MARKET LISTINGS</p><h2 id="fresh-catch-title">Available Catch</h2></div><span>{freshCatchItems.length} available</span></div>
           <p className="market-section-description">Fixed-price catches and completed auction listings from local fishermen. Quality grades are seller-reported.</p>
@@ -669,7 +694,7 @@ export default function UserApp({ user, onAuth }) {
     {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}>
       <div className="modal" onClick={event => event.stopPropagation()}>
         <button className="close" onClick={() => setSelected(null)}>×</button>
-        <img className="detail-photo" src={listingImage(selected)} alt={`${selected.fishType} catch`} />
+        <ListingPhoto className="detail-photo" item={selected} alt={`${selected.fishType} catch`} />
         <p className="kicker">{selected.saleMode === 'bid' ? bidClosed ? 'BID CLOSED' : 'LIVE BIDDING' : 'DIRECT SALE'}</p>
         <h2>{selected.fishType}, {String(selected.quality || 'ungraded').toLowerCase()} seller grade</h2>
         <p>{selected.quantity} kg from {selected.location}. {selected.description || 'Listing details supplied by the fisherman.'}</p>
