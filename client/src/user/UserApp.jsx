@@ -34,6 +34,14 @@ const itemPrice = item => Number(item.saleMode === 'bid'
   ? item.auction?.currentPrice || item.auction?.startPrice || item.expectedPrice || 0
   : item.salePrice || item.expectedPrice || 0);
 
+function priceGuide(item) {
+  const low = Number(item.predictedLow);
+  const high = Number(item.predictedHigh);
+  return Number.isFinite(low) && low > 0 && Number.isFinite(high) && high >= low
+    ? `₹${low.toLocaleString()}–₹${high.toLocaleString()}/kg`
+    : null;
+}
+
 function categoryFor(item) {
   return categories.find(category => category.matches(item))?.name || 'Fish';
 }
@@ -62,6 +70,7 @@ function FishCard({ item, onSelect, onBid, isWishlisted, onToggleWishlist, now }
   const closed = item.saleMode === 'bid' && (item.auction?.status === 'completed' || (item.auction?.endTime && new Date(item.auction.endTime).getTime() <= now));
   const auction = item.saleMode === 'bid';
   const price = itemPrice(item);
+  const guide = priceGuide(item);
   const image = listingImage(item);
   return <article className="market-product-card">
     <div className="market-product-visual">
@@ -85,6 +94,7 @@ function FishCard({ item, onSelect, onBid, isWishlisted, onToggleWishlist, now }
         <span><Gavel size={14} /> {Number(item.auction?.bidCount || 0) ? 'Highest bid' : 'Starting bid'} · ₹{price.toLocaleString()}/kg</span>
       </div>}
       <div className="market-product-price"><span>{auction ? Number(item.auction?.bidCount || 0) ? 'Current highest bid' : 'Starting bid' : 'Price per kg'}</span><strong>₹{price.toLocaleString()}<small>/kg</small></strong></div>
+      {guide && <p className="market-price-guide"><span>Rule-based guide</span><strong>{guide}</strong></p>}
       <div className="market-product-actions">
         <button className="market-details-button" onClick={() => onSelect(item)}>View details</button>
         <button className="market-buy-button" disabled={auction && closed} onClick={() => auction ? onBid(item) : onSelect(item)}>{auction ? closed ? 'Auction ended' : 'Place bid' : 'Buy now'}</button>
@@ -544,8 +554,8 @@ export default function UserApp({ user, onAuth }) {
         </section>}
         {message && <p className={messageType === 'error' ? 'notice' : 'success-notice'}>{message}</p>}
         <section className="market-listing-section" aria-labelledby="fresh-catch-title">
-          <div className="market-section-title"><div><p className="kicker">JUST LANDED</p><h2 id="fresh-catch-title">Today's Fresh Catch</h2></div><span>{freshCatchItems.length} available</span></div>
-          <p className="market-section-description">Available fixed-price catches and completed auction listings from local fishermen.</p>
+          <div className="market-section-title"><div><p className="kicker">MARKET LISTINGS</p><h2 id="fresh-catch-title">Available Catch</h2></div><span>{freshCatchItems.length} available</span></div>
+          <p className="market-section-description">Fixed-price catches and completed auction listings from local fishermen. Quality grades are seller-reported.</p>
           <div className="fish-grid">
             {loading ? <p className="empty">Scanning the morning catch...</p> : freshCatchItems.map(item => <FishCard key={item.id} item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
             {!loading && !freshCatchItems.length && <p className="empty buyer-no-results">No fresh catches are available in this category right now.</p>}
@@ -600,8 +610,9 @@ export default function UserApp({ user, onAuth }) {
         <img className="detail-photo" src={listingImage(selected)} alt={`${selected.fishType} catch`} />
         <p className="kicker">{selected.saleMode === 'bid' ? bidClosed ? 'BID CLOSED' : 'LIVE BIDDING' : 'DIRECT SALE'}</p>
         <h2>{selected.fishType}, {String(selected.quality || 'ungraded').toLowerCase()} seller grade</h2>
-        <p>{selected.quantity} kg from {selected.location}. {selected.description || 'Fresh catch details supplied by the fisherman.'}</p>
+        <p>{selected.quantity} kg from {selected.location}. {selected.description || 'Listing details supplied by the fisherman.'}</p>
         <p className="quality-safety-note">The quality grade is seller-provided. Any AI image result identifies species only and does not estimate freshness or replace food-safety inspection.</p>
+        {priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative rule-based price guide: {priceGuide(selected)}.</strong> This is a simple estimate based on listing details, not an ML prediction, live market quote, or guaranteed price.</p>}
         {selected.saleMode === 'bid' && <div className="price-readout">
           <span>Initial price</span><strong>₹{selected.auction?.startPrice || selected.expectedPrice}/kg</strong>
           <span>Current price</span><strong>₹{selected.auction?.currentPrice || selected.expectedPrice}/kg <small>+{selected.auction?.priceIncreasePercent || 0}%</small></strong>
@@ -613,7 +624,7 @@ export default function UserApp({ user, onAuth }) {
             : bidClosed
               ? <button className="button primary full" onClick={() => user ? setCheckout({ type: 'auction' }) : onAuth('login')}>Checkout winning bid</button>
               : <p className="form-hint">Bidding has stopped. The winning buyer can complete checkout.</p>}
-        {selected.imageVerification === 'verified' && <p className="verification">Image verification marked complete · not a freshness or food-safety check</p>}
+        {selected.imageVerification === 'verified' && <p className="verification">Image status marked complete · not a species, freshness, or food-safety check</p>}
         {message && <p className="form-error">{message}</p>}
       </div>
     </div>}

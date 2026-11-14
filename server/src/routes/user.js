@@ -49,7 +49,22 @@ const limitFishDetection = (req, res, next) => {
 };
 const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role });
 const fishermanFor = async id => sanitizeUser(await get('users', id));
-const listingView = async listing => { const auction = (await list('auctions')).find(item => item.listing === listing.id) || null; const bids = auction ? sortAmount(where(await list('bids'), { auction: auction.id })) : []; const currentPrice = bids[0]?.amount || auction?.startPrice || listing.salePrice || listing.expectedPrice; return { ...listing, fisherman: await fishermanFor(listing.fisherman), auction: auction ? { ...auction, bidCount: bids.length, currentPrice, priceIncreasePercent: auction.startPrice ? +(((currentPrice - auction.startPrice) / auction.startPrice) * 100).toFixed(2) : 0 } : null }; };
+const listingView = async listing => {
+  const auction = (await list('auctions')).find(item => item.listing === listing.id) || null;
+  const bids = auction ? sortAmount(where(await list('bids'), { auction: auction.id })) : [];
+  const currentPrice = bids[0]?.amount || auction?.startPrice || listing.salePrice || listing.expectedPrice;
+  const guide = predictPrice(listing.fishType, Number(listing.quantity), listing.quality, listing.size);
+  const storedLow = Number(listing.predictedLow);
+  const storedHigh = Number(listing.predictedHigh);
+  const hasStoredGuide = Number.isFinite(storedLow) && storedLow > 0 && Number.isFinite(storedHigh) && storedHigh >= storedLow;
+  return {
+    ...listing,
+    predictedLow: hasStoredGuide ? storedLow : guide.low,
+    predictedHigh: hasStoredGuide ? storedHigh : guide.high,
+    fisherman: await fishermanFor(listing.fisherman),
+    auction: auction ? { ...auction, bidCount: bids.length, currentPrice, priceIncreasePercent: auction.startPrice ? +(((currentPrice - auction.startPrice) / auction.startPrice) * 100).toFixed(2) : 0 } : null
+  };
+};
 
 async function beginRazorpayPayment(order, address) {
   const amount = Math.round(Number(order.amount) * 100);

@@ -155,7 +155,7 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
         <p className="listing-section-label">Catch details</p>
         <div className="form-grid">
           <label className="listing-field"><span>Fish species</span><select name="fishType" value={form.fishType} onChange={onChange} required><option value="">Select species</option>{meta.fishTypes.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label className="listing-field"><span>Seller quality grade</span><select name="quality" value={form.quality} onChange={onChange}>{meta.qualities.map(value => <option key={value}>{value}</option>)}</select></label>
+          <label className="listing-field"><span>Seller-reported quality grade</span><select name="quality" value={form.quality} onChange={onChange}>{meta.qualities.map(value => <option key={value}>{value}</option>)}</select><small className="listing-grade-hint">Not AI-detected or independently inspected for freshness.</small></label>
           <label className="listing-field"><span>Catch size</span><select name="size" value={form.size} onChange={onChange}>{meta.sizes.map(value => <option key={value}>{value}</option>)}</select></label>
           <label className="listing-field"><span>Quantity (kg)</span><input name="quantity" type="number" min="1" placeholder="e.g. 25" value={form.quantity} onChange={onChange} required /></label>
           <label className="listing-field"><span>Landing port</span><input name="location" placeholder="e.g. Mangalore" value={form.location} onChange={onChange} required /></label>
@@ -174,7 +174,32 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
     </form>
   </section>;
 }
-function CatchRow({ item, onClose, onDelete }) { const auction = item.auction; const image = sampleImageFor(item); const canDelete = item.status === 'available' && !auction; const canClose = item.saleMode === 'bid' && item.status === 'auction' && ['active', 'scheduled'].includes(auction?.status); return <article className="catch-row">{image ? <img src={image} alt={item.imageUrl ? item.fishType : `${item.fishType} sample image`} /> : <div className="catch-placeholder"><Fish size={30} /></div>}<div className="catch-main"><div className="card-row"><h3>{item.fishType}</h3><span className="quality">{item.saleMode === 'bid' ? 'BID' : 'SALE'}</span></div><p>{item.quantity} kg · {item.quality} · {item.location}</p>{item.saleMode === 'bid' && auction ? <div className="live-price">Initial ₹{auction.startPrice} · Current ₹{auction.currentPrice || auction.startPrice} · <b>+{auction.priceIncreasePercent || 0}%</b>{auction.status === 'completed' && auction.winner ? ' · Winner selected' : auction.status === 'completed' ? ' · Closed with no bids' : ''}</div> : <div className="live-price">Fixed sale ₹{item.salePrice || item.expectedPrice}/kg</div>}<div className="verification">{item.imageVerification === 'verified' ? <><CheckCircle2 size={14} /> AI image verified</> : item.imageUrl ? <><ImagePlus size={14} /> Photo uploaded · no AI check</> : <><ImagePlus size={14} /> Photo needed</>}</div></div><div className="catch-side"><strong>₹{item.saleMode === 'bid' ? auction?.currentPrice || item.expectedPrice : item.salePrice || item.expectedPrice}<small>/kg</small></strong>{canClose && <button className="button small dark" onClick={() => onClose(auction.id)}>Stop bidding</button>}{canDelete && <button className="icon-button danger" title="Delete listing" onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}</div></article>; }
+function CatchRow({ item, onClose, onDelete }) {
+  const auction = item.auction;
+  const image = sampleImageFor(item);
+  const low = Number(item.predictedLow);
+  const high = Number(item.predictedHigh);
+  const hasPriceGuide = Number.isFinite(low) && low > 0 && Number.isFinite(high) && high >= low;
+  const canDelete = item.status === 'available' && !auction;
+  const canClose = item.saleMode === 'bid' && item.status === 'auction' && ['active', 'scheduled'].includes(auction?.status);
+  return <article className="catch-row">
+    {image ? <img src={image} alt={item.imageUrl ? item.fishType : `${item.fishType} sample image`} /> : <div className="catch-placeholder"><Fish size={30} /></div>}
+    <div className="catch-main">
+      <div className="card-row"><h3>{item.fishType}</h3><span className="quality">{item.saleMode === 'bid' ? 'BID' : 'SALE'}</span></div>
+      <p>{item.quantity} kg · Seller grade: {item.quality} · {item.location}</p>
+      {item.saleMode === 'bid' && auction
+        ? <div className="live-price">Initial ₹{auction.startPrice} · Current ₹{auction.currentPrice || auction.startPrice} · <b>+{auction.priceIncreasePercent || 0}%</b>{auction.status === 'completed' && auction.winner ? ' · Winner selected' : auction.status === 'completed' ? ' · Closed with no bids' : ''}</div>
+        : <div className="live-price">Fixed sale ₹{item.salePrice || item.expectedPrice}/kg</div>}
+      {hasPriceGuide && <div className="live-price">Rule-based price guide ₹{low.toLocaleString()}–₹{high.toLocaleString()}/kg · not a guaranteed sale price</div>}
+      <div className="verification">{item.imageVerification === 'verified' ? <><CheckCircle2 size={14} /> Image status marked complete</> : item.imageUrl ? <><ImagePlus size={14} /> Photo uploaded · species not AI-checked</> : <><ImagePlus size={14} /> Photo needed</>}</div>
+    </div>
+    <div className="catch-side">
+      <strong>₹{item.saleMode === 'bid' ? auction?.currentPrice || item.expectedPrice : item.salePrice || item.expectedPrice}<small>/kg</small></strong>
+      {canClose && <button className="button small dark" onClick={() => onClose(auction.id)}>Stop bidding</button>}
+      {canDelete && <button className="icon-button danger" title="Delete listing" onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}
+    </div>
+  </article>;
+}
 function OrdersPage({ orders }) { return <section className="panel fisherman-data"><div className="panel-title"><h2>Orders from buyers</h2><span>{orders.length} orders</span></div>{orders.map(order => <OrderRow key={order.id} order={order} />)}{!orders.length && <p className="empty">No buyer orders yet.</p>}</section>; }
 function SalesPage({ orders }) { const completed = orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay'); const total = completed.reduce((sum, order) => sum + Number(order.amount || 0), 0); return <section className="panel fisherman-data"><div className="panel-title"><h2>Selling data</h2><span>Total ₹{total.toLocaleString()}</span></div>{completed.map(order => <OrderRow key={order.id} order={order} sale />)}{!completed.length && <p className="empty">Verified Razorpay payments will appear here after buyer checkout.</p>}</section>; }
 function OrderRow({ order, sale = false }) { const listing = order.listingDetails; const image = sampleImageFor(listing); return <article className="order-row">{image ? <img src={image} alt={listing.imageUrl ? listing.fishType : `${listing.fishType} sample image`} /> : <div className="catch-placeholder"><Fish size={22} /></div>}<div><strong>{listing?.fishType || 'Fish order'}</strong><small>Order {order.orderNumber || order.id}</small><small>{order.quantity || listing?.quantity || 0} kg · Buyer order · {new Date(order.createdAt).toLocaleDateString()}</small></div><div className="order-amount"><strong>₹{Number(order.amount || 0).toLocaleString()}</strong><small className={sale ? 'status-paid' : ''}>{order.orderStatus || 'pending'}</small></div></article>; }

@@ -367,6 +367,10 @@
 .market-product-price>span{color:var(--muted);font-size:10px}
 .market-product-price>strong{color:var(--ink);font-size:19px}
 .market-product-price>strong small{margin-left:2px;color:var(--muted);font-size:10px;font-weight:500}
+.market-price-guide{display:flex;justify-content:space-between;gap:8px;margin:0;padding:0 0 11px;color:var(--muted);font-size:9px}
+.market-price-guide strong{color:#52746b;font-size:9px;font-weight:700;text-align:right}
+.market-price-guide-note{border-color:#e4e6d9;background:#f8f8f1}
+.listing-grade-hint{color:#778780;font-size:8px;font-weight:500;line-height:1.4}
 .market-product-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .market-product-actions button{min-width:0;padding:10px 8px;border-radius:8px;font-size:10px;font-weight:800;transition:background .16s,color .16s}
 .market-details-button{border:1px solid #cadbd6;background:#edf5f2;color:var(--ink)}

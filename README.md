@@ -21,7 +21,7 @@ To open the admin dashboard locally, start the project with `npm run dev`, go to
 
 The login and account-creation forms use standard username/password autocomplete fields so Chrome/Google Password Manager can offer to save or autofill each account after you sign in. Accept Chrome's **Save password?** prompt and choose the Google account/profile where you want it stored. If the prompt is not shown, use the key icon in Chrome's address bar or check Chrome → **Settings → Password Manager**. TideMarket stores account passwords as bcrypt hashes; it does not send plaintext passwords to Google. Admin, buyer, and fisherman logins use the same compatible login form.
 
-The API stores users, listings, auctions, bids, orders, and payment attempts in Firebase Realtime Database under the `users`, `listings`, `auctions`, `bids`, `orders`, and `payments` nodes. The API currently uses a transparent rule-based price estimate in `server/src/utils.js`.
+The API stores users, listings, auctions, bids, orders, and payment attempts in Firebase Realtime Database under the `users`, `listings`, `auctions`, `bids`, `orders`, and `payments` nodes. Its indicative price guide is a transparent rule-based estimate in `server/src/utils.js`, based on species, seller-reported grade, size, and quantity. It is not an ML prediction or a live market quote, and it does not guarantee a sale price. Seafood quality grades are seller-reported; photo identification checks species only and does not detect freshness or food safety.
 
 ### Explore the complete marketplace with demo data
 

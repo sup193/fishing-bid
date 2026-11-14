@@ -3,10 +3,10 @@
     "users_1791880077852_e0251699ad6f8": {
       "name": "Tide Admin",
       "email": "tide@gmail.com",
-      "passwordHash": "$2b$12$zoVXuqD.1RcG5uBKnrT8.uvctchkNzRKbjX/YucjXTCcBeVkX1q3a",
+      "passwordHash": "$2b$12$p9H9/PxWTv1rkE2FOYCHdejpGKhWSd.wftvPvi.xiFDnpcQFsEjUO",
       "role": "admin",
       "createdAt": "2026-10-13T08:27:57.852Z",
-      "updatedAt": "2026-11-12T16:22:37.301Z",
+      "updatedAt": "2026-11-14T09:33:00.736Z",
       "phone": "+91 90000 00000",
       "location": "Karnataka Coast",
       "status": "approved"
@@ -239,7 +239,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-28T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.910Z",
+      "updatedAt": "2026-11-13T06:56:01.330Z",
       "removedAt": "2026-10-31T16:57:53.184Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -259,7 +259,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-27T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.912Z",
+      "updatedAt": "2026-11-13T06:56:01.337Z",
       "removedAt": "2026-10-31T16:57:59.645Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -299,7 +299,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-25T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.914Z",
+      "updatedAt": "2026-11-13T06:56:01.344Z",
       "removedAt": "2026-10-31T16:58:05.715Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -339,7 +339,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-23T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.916Z",
+      "updatedAt": "2026-11-13T06:56:01.352Z",
       "removedAt": "2026-10-31T16:58:12.152Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -379,7 +379,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-21T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.919Z",
+      "updatedAt": "2026-11-13T06:56:01.359Z",
       "removedAt": "2026-10-31T16:58:17.584Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -419,7 +419,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-19T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.923Z",
+      "updatedAt": "2026-11-13T06:56:01.367Z",
       "removedAt": "2026-10-31T16:58:36.258Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -459,7 +459,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-17T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.927Z",
+      "updatedAt": "2026-11-13T06:56:01.374Z",
       "removedAt": "2026-10-31T16:58:30.055Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -479,7 +479,7 @@
       "status": "auction",
       "demo": true,
       "createdAt": "2026-10-16T09:00:00.000Z",
-      "updatedAt": "2026-11-12T16:19:47.929Z",
+      "updatedAt": "2026-11-13T06:56:01.381Z",
       "removedAt": "2026-10-31T16:58:27.437Z",
       "removedBy": "users_1791880077852_e0251699ad6f8",
       "reservedBy": null
@@ -744,6 +744,25 @@
       "demo": true,
       "createdAt": "2026-10-31T13:00:00.000Z",
       "updatedAt": "2026-11-12T16:19:47.954Z"
+    },
+    "listing_1794649924185_1c2444dffec95": {
+      "fisherman": "demo-fisher-1",
+      "fishType": "Lobster",
+      "quantity": 1,
+      "quality": "Premium",
+      "size": "Medium",
+      "location": "mangalore",
+      "expectedPrice": 77,
+      "salePrice": 77,
+      "saleMode": "sale",
+      "description": "",
+      "imageUrl": "/uploads/1794649849087-38beb2a449a848.jpg",
+      "imageVerification": "pending",
+      "predictedLow": 1302.72,
+      "predictedHigh": 1529.28,
+      "status": "available",
+      "createdAt": "2026-11-14T09:52:04.185Z",
+      "updatedAt": "2026-11-14T09:52:04.185Z"
     }
   },
   "auctions": {
@@ -777,12 +796,12 @@
       "minimumIncrement": 10,
       "startTime": "2026-11-09T08:00:00.000Z",
       "endTime": "2026-11-12T22:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.206Z",
-      "winner": null,
-      "winningBid": null
+      "updatedAt": "2026-11-13T06:56:01.334Z",
+      "winner": "demo-buyer-2",
+      "winningBid": 540
     },
     "demo-auction-prawns": {
       "id": "demo-auction-prawns",
@@ -791,13 +810,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-11-08T08:00:00.000Z",
       "endTime": "2026-11-12T23:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.208Z",
+      "updatedAt": "2026-11-13T06:56:01.341Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-1",
+      "winningBid": 630
     },
     "demo-auction-squid": {
       "id": "demo-auction-squid",
@@ -806,13 +825,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-11-06T08:00:00.000Z",
       "endTime": "2026-11-13T00:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.209Z",
+      "updatedAt": "2026-11-13T06:56:01.349Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-1",
+      "winningBid": 360
     },
     "demo-auction-mackerel": {
       "id": "demo-auction-mackerel",
@@ -821,13 +840,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-11-04T08:00:00.000Z",
       "endTime": "2026-11-13T01:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.210Z",
+      "updatedAt": "2026-11-13T06:56:01.356Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-3",
+      "winningBid": 260
     },
     "demo-auction-bangus": {
       "id": "demo-auction-bangus",
@@ -836,13 +855,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-11-02T08:00:00.000Z",
       "endTime": "2026-11-13T02:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.212Z",
+      "updatedAt": "2026-11-13T06:56:01.364Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-3",
+      "winningBid": 300
     },
     "demo-auction-kingfish": {
       "id": "demo-auction-kingfish",
@@ -851,13 +870,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-10-31T08:00:00.000Z",
       "endTime": "2026-11-13T03:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.213Z",
+      "updatedAt": "2026-11-13T06:56:01.371Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-2",
+      "winningBid": 510
     },
     "demo-auction-oysters": {
       "id": "demo-auction-oysters",
@@ -866,13 +885,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-10-29T08:00:00.000Z",
       "endTime": "2026-11-13T04:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.214Z",
+      "updatedAt": "2026-11-13T06:56:01.378Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-2",
+      "winningBid": 540
     },
     "demo-auction-anchovy": {
       "id": "demo-auction-anchovy",
@@ -881,13 +900,13 @@
       "minimumIncrement": 10,
       "startTime": "2026-10-28T08:00:00.000Z",
       "endTime": "2026-11-13T05:19:47.859Z",
-      "status": "active",
+      "status": "completed",
       "demo": true,
       "createdAt": "2026-10-23T08:00:00.000Z",
-      "updatedAt": "2026-11-12T16:59:23.215Z",
+      "updatedAt": "2026-11-13T06:56:01.385Z",
       "cancelledBy": "users_1791880077852_e0251699ad6f8",
-      "winner": null,
-      "winningBid": null
+      "winner": "demo-buyer-1",
+      "winningBid": 240
     }
   },
   "bids": {
@@ -1232,6 +1251,134 @@
       "demo": true,
       "createdAt": "2026-10-31T13:00:00.000Z",
       "updatedAt": "2026-11-12T16:19:48.057Z"
+    },
+    "auction_demo-auction-pomfret": {
+      "orderNumber": "TM-1794552961332",
+      "auction": "demo-auction-pomfret",
+      "listing": "demo-listing-pomfret",
+      "buyer": "demo-buyer-2",
+      "fisherman": "demo-fisher-1",
+      "quantity": 26,
+      "amount": 14040,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.332Z",
+      "updatedAt": "2026-11-13T06:56:01.332Z"
+    },
+    "auction_demo-auction-prawns": {
+      "orderNumber": "TM-1794552961339",
+      "auction": "demo-auction-prawns",
+      "listing": "demo-listing-prawns",
+      "buyer": "demo-buyer-1",
+      "fisherman": "demo-fisher-2",
+      "quantity": 32,
+      "amount": 20160,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.340Z",
+      "updatedAt": "2026-11-13T06:56:01.340Z"
+    },
+    "auction_demo-auction-squid": {
+      "orderNumber": "TM-1794552961346",
+      "auction": "demo-auction-squid",
+      "listing": "demo-listing-squid",
+      "buyer": "demo-buyer-1",
+      "fisherman": "demo-fisher-3",
+      "quantity": 29,
+      "amount": 10440,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.347Z",
+      "updatedAt": "2026-11-13T06:56:01.347Z"
+    },
+    "auction_demo-auction-mackerel": {
+      "orderNumber": "TM-1794552961354",
+      "auction": "demo-auction-mackerel",
+      "listing": "demo-listing-mackerel",
+      "buyer": "demo-buyer-3",
+      "fisherman": "demo-fisher-4",
+      "quantity": 55,
+      "amount": 14300,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.355Z",
+      "updatedAt": "2026-11-13T06:56:01.355Z"
+    },
+    "auction_demo-auction-bangus": {
+      "orderNumber": "TM-1794552961361",
+      "auction": "demo-auction-bangus",
+      "listing": "demo-listing-bangus",
+      "buyer": "demo-buyer-3",
+      "fisherman": "demo-fisher-1",
+      "quantity": 38,
+      "amount": 11400,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.362Z",
+      "updatedAt": "2026-11-13T06:56:01.362Z"
+    },
+    "auction_demo-auction-kingfish": {
+      "orderNumber": "TM-1794552961369",
+      "auction": "demo-auction-kingfish",
+      "listing": "demo-listing-kingfish",
+      "buyer": "demo-buyer-2",
+      "fisherman": "demo-fisher-3",
+      "quantity": 24,
+      "amount": 12240,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.369Z",
+      "updatedAt": "2026-11-13T06:56:01.369Z"
+    },
+    "auction_demo-auction-oysters": {
+      "orderNumber": "TM-1794552961375",
+      "auction": "demo-auction-oysters",
+      "listing": "demo-listing-oysters",
+      "buyer": "demo-buyer-2",
+      "fisherman": "demo-fisher-1",
+      "quantity": 22,
+      "amount": 11880,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.376Z",
+      "updatedAt": "2026-11-13T06:56:01.376Z"
+    },
+    "auction_demo-auction-anchovy": {
+      "orderNumber": "TM-1794552961382",
+      "auction": "demo-auction-anchovy",
+      "listing": "demo-listing-anchovy",
+      "buyer": "demo-buyer-1",
+      "fisherman": "demo-fisher-2",
+      "quantity": 65,
+      "amount": 15600,
+      "paymentStatus": "pending",
+      "orderStatus": "awaiting-checkout",
+      "purchaseType": "",
+      "address": "",
+      "paymentMethod": "",
+      "createdAt": "2026-11-13T06:56:01.383Z",
+      "updatedAt": "2026-11-13T06:56:01.383Z"
     }
   },
   "payments": {
