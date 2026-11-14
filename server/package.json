@@ -2,7 +2,7 @@
   "name": "smart-fishing-api",
   "version": "1.0.0",
   "type": "module",
-  "scripts": {"dev": "node --watch src/index.js", "start": "node src/index.js", "seed:demo": "node src/seed-demo.js"},
+  "scripts": {"dev": "node --watch src/index.js", "start": "node src/index.js", "seed:demo": "node src/seed-demo.js", "test": "node --test"},
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",

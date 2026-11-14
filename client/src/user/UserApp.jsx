@@ -110,44 +110,61 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
     return totals;
   }, {});
   const availableFish = Object.keys(totalsByFish).sort((a, b) => totalsByFish[b] - totalsByFish[a] || a.localeCompare(b));
-  const selectedFish = fishType === 'all' ? availableFish.slice(0, 4) : [fishType];
-  const chartPoints = points.filter(point => selectedFish.includes(point.fishType));
+  const selectedPoints = points.filter(point => fishType === 'all' || point.fishType === fishType);
+  const pointsByDateSource = new Map();
+  for (const point of selectedPoints) {
+    const key = `${point.date}:${point.source}`;
+    const group = pointsByDateSource.get(key) || { date: point.date, source: point.source, total: 0, observations: 0 };
+    group.total += point.averagePrice * point.observations;
+    group.observations += point.observations;
+    pointsByDateSource.set(key, group);
+  }
+  const chartPoints = [...pointsByDateSource.values()].map(point => ({
+    ...point,
+    averagePrice: point.total / point.observations
+  }));
   const dates = [...new Set(chartPoints.map(point => point.date))].sort();
-  const pointByDateFish = new Map(chartPoints.map(point => [`${point.date}:${point.fishType}`, point]));
+  const pointByDateSource = new Map(chartPoints.map(point => [`${point.date}:${point.source}`, point]));
   const maxPrice = Math.max(0, ...chartPoints.map(point => point.averagePrice));
-  const step = maxPrice <= 500 ? 100 : maxPrice <= 2000 ? 500 : 1000;
+  const step = maxPrice <= 500 ? 100 : maxPrice <= 2000 ? 500 : maxPrice <= 5000 ? 1000 : 5000;
   const yMax = Math.max(step, Math.ceil(maxPrice / step) * step);
   const chart = { width: 840, height: 250, left: 62, right: 22, top: 18, bottom: 42 };
   const plotWidth = chart.width - chart.left - chart.right;
   const plotHeight = chart.height - chart.top - chart.bottom;
-  const colors = ['#0b9a91', '#f06b68', '#8065df', '#e4a62c'];
+  const sources = [
+    { key: 'auction', label: 'Auction bids', color: '#0b9a91' },
+    { key: 'market', label: 'Fixed-price listings', color: '#f06b68' },
+    { key: 'sales', label: 'Paid sales', color: '#8065df' }
+  ];
   const dateLabel = value => new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const activeAuctions = items.filter(item => item.saleMode === 'bid' && item.auction?.status !== 'completed' && (!item.auction?.endTime || new Date(item.auction.endTime).getTime() > now));
   const activeBidCount = activeAuctions.reduce((total, item) => total + Number(item.auction?.bidCount || 0), 0);
+  const paidSalesCount = points.filter(point => point.source === 'sales').reduce((total, point) => total + point.observations, 0);
 
-  return <section className="market-trend-panel" aria-label="Market price trend">
+  return <section className="market-trend-panel" aria-label="Auction and seafood sales trends">
     <div className="market-trend-heading">
       <div className="market-trend-title">
         <span className="market-trend-icon"><BarChart3 size={19} /></span>
-        <div><p className="kicker">LIVE OCEAN MARKET PULSE</p><h2>Seafood prices &amp; trends</h2><p>Current market activity and daily average prices from listings and bids.</p></div>
+        <div><p className="kicker">LIVE OCEAN MARKET PULSE</p><h2>Auction, market &amp; sales trends</h2><p>Compare auction bids, fixed-price listings, and verified paid sales per kg.</p></div>
       </div>
       <div className="market-trend-controls">
         <label><span>Period</span><select value={days} onChange={event => onDaysChange(Number(event.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select></label>
-        {availableFish.length > 1 && <label><span>Seafood</span><select value={fishType} onChange={event => onFishTypeChange(event.target.value)}><option value="all">Top seafood</option>{availableFish.map(type => <option key={type} value={type}>{type}</option>)}</select></label>}
+        {availableFish.length > 0 && <label><span>Seafood</span><select value={fishType} onChange={event => onFishTypeChange(event.target.value)}><option value="all">All seafood</option>{availableFish.map(type => <option key={type} value={type}>{type}</option>)}</select></label>}
       </div>
     </div>
     <div className="market-pulse-stats" aria-label="Current marketplace activity">
       <article><span>Available lots</span><strong>{items.length}</strong></article>
       <article><span>Live auctions</span><strong>{activeAuctions.length}</strong></article>
       <article><span>Bids on live auctions</span><strong>{activeBidCount}</strong></article>
+      <article><span>Paid sales</span><strong>{paidSalesCount}</strong></article>
       {data?.generatedAt && <span className="market-pulse-updated">Updated {new Date(data.generatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>}
     </div>
     {error && <p className="notice market-trend-message">{error}</p>}
     {loading && <p className="empty market-trend-message">Loading recorded market prices…</p>}
-    {!loading && !error && !chartPoints.length && <p className="empty market-trend-message">Price trends will appear as fishermen publish listings and buyers place bids during this period.</p>}
+    {!loading && !error && !chartPoints.length && <p className="empty market-trend-message">Trends will appear as fishermen list catches, buyers bid, and paid orders are recorded.</p>}
     {!loading && !error && chartPoints.length > 0 && <>
       <div className="market-trend-chart-wrap">
-        <svg className="market-trend-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={`Daily recorded seafood prices over the last ${days} days`}>
+        <svg className="market-trend-chart" viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={`Daily auction bid, fixed-price listing, and paid sale averages over the last ${days} days`}>
           {[0, 1, 2, 3, 4].map(tick => {
             const value = yMax * tick / 4;
             const y = chart.top + plotHeight * (1 - tick / 4);
@@ -158,20 +175,20 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
           })}
           {dates.map((date, dateIndex) => {
             const slotWidth = plotWidth / dates.length;
-            const seriesCount = selectedFish.length;
-            const groupWidth = Math.min(slotWidth * .66, seriesCount * 32);
-            const barWidth = Math.max(8, Math.min(24, (groupWidth / Math.max(seriesCount, 1)) - 5));
+            const groupWidth = Math.min(slotWidth * .84, sources.length * 24);
+            const seriesWidth = groupWidth / sources.length;
+            const barWidth = Math.max(3, Math.min(20, seriesWidth - 2));
             const groupStart = chart.left + slotWidth * dateIndex + (slotWidth - groupWidth) / 2;
             return <g key={date}>
-              {selectedFish.map((type, seriesIndex) => {
-                const point = pointByDateFish.get(`${date}:${type}`);
+              {sources.map((source, seriesIndex) => {
+                const point = pointByDateSource.get(`${date}:${source.key}`);
                 if (!point) return null;
                 const barHeight = Math.max(2, plotHeight * point.averagePrice / yMax);
-                const x = groupStart + seriesIndex * (groupWidth / seriesCount) + (groupWidth / seriesCount - barWidth) / 2;
+                const x = groupStart + seriesIndex * seriesWidth + (seriesWidth - barWidth) / 2;
                 const y = chart.top + plotHeight - barHeight;
-                return <g key={type}>
-                  <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={colors[seriesIndex % colors.length]} className="trend-bar">
-                    <title>{`${type} · ${dateLabel(date)} · ₹${point.averagePrice.toLocaleString()}/kg · ${point.observations} recorded ${point.observations === 1 ? 'price' : 'prices'}`}</title>
+                return <g key={source.key}>
+                  <rect x={x} y={y} width={barWidth} height={barHeight} rx="5" fill={source.color} className="trend-bar">
+                    <title>{`${source.label} · ${dateLabel(date)} · ₹${point.averagePrice.toLocaleString()}/kg · ${point.observations} ${point.observations === 1 ? 'observation' : 'observations'}`}</title>
                   </rect>
                 </g>;
               })}
@@ -180,8 +197,8 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
           })}
         </svg>
       </div>
-      <div className="market-trend-legend">{selectedFish.map((type, index) => <span key={type}><i style={{ backgroundColor: colors[index % colors.length] }} />{type}</span>)}</div>
-      <p className="market-trend-footnote">These are observed listing prices and auction bids, not completed-sale prices. Only dates with recorded price activity are shown.</p>
+      <div className="market-trend-legend">{sources.map(source => <span key={source.key}><i style={{ backgroundColor: source.color }} />{source.label}</span>)}</div>
+      <p className="market-trend-footnote">Auction bars show each listing’s latest observed auction price (the starting bid until the first bid); fixed-price bars show listed prices. Paid-sale bars use verified Razorpay orders divided by order quantity. All prices are per kg.</p>
     </>}
   </section>;
 }
@@ -294,6 +311,7 @@ export default function UserApp({ user, onAuth }) {
     const category = categories.find(option => option.name === selectedCategory);
     return selectedCategory === 'All' || category?.matches(item);
   }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const guestPreviewItems = visible.slice(0, 3);
   const activeAuctions = items.filter(item => item.saleMode === 'bid' && item.auction?.status !== 'completed' && (!item.auction?.endTime || new Date(item.auction.endTime).getTime() > now)).length;
   const landingLocations = new Set(items.map(item => item.location).filter(Boolean)).size;
   const purchaseCounts = [...(buyerHistory?.orders || []), ...(buyerHistory?.bids || [])].reduce((counts, activity) => {
@@ -447,6 +465,15 @@ export default function UserApp({ user, onAuth }) {
   const buyerView = user?.role === 'buyer';
   const currentView = buyerView ? dashboardView : 'market';
   return <div className={`user-shell${buyerView ? ' buyer-dashboard' : ''}`}>
+    {!user && <div className="guest-login-ticker">
+      <div className="guest-login-ticker-window" role="status" aria-label="Log in to get more features and explore more products">
+        <div className="guest-login-ticker-track" aria-hidden="true">
+          <span>Log in to get more features and explore more products</span>
+          <span>Log in to get more features and explore more products</span>
+        </div>
+      </div>
+      <button className="guest-ticker-button" onClick={() => onAuth('login')}>Log in</button>
+    </div>}
     {buyerView && <>
       <section className="buyer-overview">
         <div className="buyer-welcome">
@@ -476,18 +503,18 @@ export default function UserApp({ user, onAuth }) {
           <h1>From Our Coast,<br /><em>Fresh to Your Table.</em></h1>
           <p>Discover responsibly sourced seafood, connect with local fishers, and bring the day’s finest catch straight to your table.</p>
           <div className="guest-hero-actions">
-            <a className="button guest-primary" href="#categories">Explore seafood <ArrowUpRight size={18} /></a>
+            <a className="button guest-primary" href="#featured-catches">See featured catches <ArrowUpRight size={18} /></a>
             <button className="guest-secondary" onClick={() => setShowBiddingGuide(true)}>How bidding works</button>
           </div>
           <div className="guest-trust"><span><i /> Fresh catches, listed daily</span><span><i /> Fair trade, coast to coast</span></div>
         </div>
         <div className="guest-hero-art">
           <img className="guest-hero-image" src="/images/seafood-hero.svg" alt="Illustration of a fresh fish above ocean waves" />
-          <div className="guest-market-status"><span className="guest-live-dot" /> LIVE MARKET <b>{loading ? '…' : `${items.length} ${items.length === 1 ? 'catch' : 'catches'}`}</b></div>
+          <div className="guest-market-status"><span className="guest-live-dot" /> MARKET PREVIEW <b>Fresh from the coast</b></div>
           <div className="guest-art-caption"><strong>Today's catch,<br />straight from the coast.</strong><span>Local fishermen · fair prices</span></div>
         </div>
       </section>}
-      <section className="market buyer-market" id="market">
+      {user ? <section className="market buyer-market" id="market">
         {listingError && <p className="notice market-listing-error" role="status">Could not refresh marketplace listings: {listingError}. Showing the latest available listings.</p>}
         <section className="market-pulse-section" aria-label="Live market pulse">
           <MarketTrendChart
@@ -579,7 +606,42 @@ export default function UserApp({ user, onAuth }) {
             <small>{fisherman.listingCount} {fisherman.listingCount === 1 ? 'catch' : 'catches'}</small>
           </article>)}</div> : <p className="empty">Fishermen will appear here when they publish available catches.</p>}
         </section>
-      </section>
+      </section> : <section className="market guest-market" id="market">
+        <MarketTrendChart
+          data={trendData}
+          loading={trendLoading}
+          error={trendError}
+          days={trendDays}
+          onDaysChange={setTrendDays}
+          fishType={trendFishType}
+          onFishTypeChange={setTrendFishType}
+          items={items}
+          now={now}
+        />
+        <section className="guest-preview" id="featured-catches" aria-labelledby="guest-preview-title">
+          <div className="market-section-title">
+            <div><p className="kicker">A TASTE OF THE MARKET</p><h2 id="guest-preview-title">Featured catches</h2></div>
+            <span>Preview up to 3 listings</span>
+          </div>
+          <p className="market-section-description">See what local fishermen are bringing in. Log in to browse every catch, compare prices, and join live auctions.</p>
+          <div className="fish-grid guest-preview-grid">
+            {loading ? <p className="empty">Loading featured catches…</p> : guestPreviewItems.map(item => <FishCard key={item.id} item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+            {!loading && !guestPreviewItems.length && <p className="empty buyer-no-results">New catches will appear here as local fishermen publish listings.</p>}
+          </div>
+        </section>
+        <section className="guest-benefits" aria-labelledby="guest-benefits-title">
+          <div className="guest-benefits-heading"><p className="kicker">FRESH, FAIR, CONNECTED</p><h2 id="guest-benefits-title">A better way to buy from the coast.</h2><p>TideMarket brings seafood buyers and local fishermen together in one easy-to-use marketplace.</p></div>
+          <div className="guest-benefit-grid">
+            <article><span><Waves size={20} /></span><h3>Fresh catches</h3><p>Discover seafood listed by local fishermen after each landing.</p></article>
+            <article><span><CircleDollarSign size={20} /></span><h3>Clear prices</h3><p>Compare fixed-price listings and follow open bids in one place.</p></article>
+            <article><span><Gavel size={20} /></span><h3>Fair bidding</h3><p>Join live auctions and keep track of your bids and orders.</p></article>
+          </div>
+        </section>
+        <section className="guest-login-cta">
+          <div><p className="kicker">READY TO EXPLORE?</p><h2>Log in for more features and products.</h2><p>Browse the full marketplace, place bids, and manage your orders with a TideMarket account.</p></div>
+          <button className="button guest-primary" onClick={() => onAuth('login')}>Log in to TideMarket <ArrowUpRight size={18} /></button>
+        </section>
+      </section>}
     </>}
     {buyerView && currentView === 'history' && <main className="buyer-view" id="history">
       <div className="buyer-page-heading"><div><p className="kicker">YOUR ACTIVITY</p><h2>Bids &amp; orders</h2><p>Review your auction activity and purchase status.</p></div><History size={23} /></div>

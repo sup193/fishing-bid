@@ -44,8 +44,12 @@ All demo accounts use the password `TideDemo!2026`:
 1. Sign in as a fisherman and review Inventory, Buyer orders, and Transactions. A fisherman can publish a fixed-price catch or an auction listing.
 2. Sign in as a buyer and filter the marketplace by seafood, location, quantity, or sale type. Fixed-price catches use Buy now; open auctions show the current highest bid and let buyers place bids above the minimum increment.
 3. Use Bids & Orders and Transactions in the buyer dashboard to review private bid, checkout, and payment-attempt history. Practice entries are visibly labeled and have not charged a payment method.
-4. The public Market Pulse bar chart aggregates actual listing-price observations and bids by day and species. It refreshes when a new bid is placed; the chart does not represent completed-sale prices.
+4. The public Market Pulse chart compares daily auction-bid prices, fixed-price listing prices, and verified paid-order prices per kilogram. Filter by date range and seafood type; paid sales include only verified Razorpay orders, not practice or pending checkouts.
 5. To test a real payment flow, configure Razorpay Test Mode as described below, then check out an eligible order with Razorpay's test payment details. Without test credentials, payment stays unavailable rather than being falsely recorded as paid.
+
+### Mobile app
+
+The Expo app has role-specific tabs for buyers, fishermen, and admins, including marketplace browsing, bidding, the auction/listing/verified-sales trend chart, listing and order management, buyer approvals, moderation, bid review, and transaction history. See [mobile/README.md](./mobile/README.md) for setup instructions. Native Razorpay checkout is not enabled yet; buyers can use the website to complete a payment.
 
 ### Auction settlement and bid review
 

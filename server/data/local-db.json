@@ -3,10 +3,10 @@
     "users_1791880077852_e0251699ad6f8": {
       "name": "Tide Admin",
       "email": "tide@gmail.com",
-      "passwordHash": "$2b$12$p9H9/PxWTv1rkE2FOYCHdejpGKhWSd.wftvPvi.xiFDnpcQFsEjUO",
+      "passwordHash": "$2b$12$la4R0af/4fNa.xR98x5NzuGBKG76YF/F4PYEiKr11aAViytPBZWBm",
       "role": "admin",
       "createdAt": "2026-10-13T08:27:57.852Z",
-      "updatedAt": "2026-11-14T09:33:00.736Z",
+      "updatedAt": "2026-11-14T13:57:11.160Z",
       "phone": "+91 90000 00000",
       "location": "Karnataka Coast",
       "status": "approved"

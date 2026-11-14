@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, insert, list, update, remove, reserveListing, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { buildMarketTrendPoints } from '../marketTrends.js';
 import { allow, requireAuth, signUser } from '../auth.js';
 import { FISH_TYPES, QUALITIES, SIZES, assessBidRisk, predictPrice, refreshAuction } from '../utils.js';
 import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
@@ -216,50 +217,9 @@ router.get('/market/trends', async (req, res) => {
   const listings = await list('listings');
   const auctions = await list('auctions');
   const bids = await list('bids');
-  const auctionById = new Map(auctions.map(auction => [auction.id, auction]));
-  const auctionByListing = new Map(auctions.map(auction => [auction.listing, auction]));
-  const listingById = new Map(listings.map(listing => [listing.id, listing]));
+  const orders = await list('orders');
   const startTime = Date.now() - requestedDays * 86400000;
-  const observationsByDayAndListing = new Map();
-  const addObservation = (listing, timestamp, amount) => {
-    const observedAt = new Date(timestamp || '').getTime();
-    const price = Number(amount);
-    if (!listing || !listing.fishType || !Number.isFinite(observedAt) || observedAt < startTime || !Number.isFinite(price) || price <= 0) return;
-    const date = new Date(observedAt).toISOString().slice(0, 10);
-    const key = `${date}:${listing.id}`;
-    const previous = observationsByDayAndListing.get(key);
-    if (!previous || observedAt > previous.observedAt) {
-      observationsByDayAndListing.set(key, { date, fishType: listing.fishType, listingId: listing.id, amount: price, observedAt });
-    }
-  };
-
-  for (const listing of listings) {
-    const auction = auctionByListing.get(listing.id);
-    const initialPrice = auction?.startPrice ?? (listing.saleMode === 'bid' ? listing.expectedPrice : listing.salePrice || listing.expectedPrice);
-    addObservation(listing, listing.createdAt, initialPrice);
-  }
-  for (const bid of bids) {
-    const auction = auctionById.get(bid.auction);
-    addObservation(auction && listingById.get(auction.listing), bid.createdAt, bid.amount);
-  }
-
-  const dailyPrices = new Map();
-  for (const observation of observationsByDayAndListing.values()) {
-    const key = `${observation.date}:${observation.fishType}`;
-    const point = dailyPrices.get(key) || { date: observation.date, fishType: observation.fishType, total: 0, observations: 0 };
-    point.total += observation.amount;
-    point.observations += 1;
-    dailyPrices.set(key, point);
-  }
-
-  const points = [...dailyPrices.values()]
-    .map(point => ({
-      date: point.date,
-      fishType: point.fishType,
-      averagePrice: Number((point.total / point.observations).toFixed(2)),
-      observations: point.observations
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date) || a.fishType.localeCompare(b.fishType));
+  const points = buildMarketTrendPoints({ listings, auctions, bids, orders, startTime });
   res.json({ days: requestedDays, generatedAt: new Date().toISOString(), points });
 });
 router.get('/listings', async (req, res) => { let items = (await list('listings')).filter(item => ['available', 'auction'].includes(item.status)); if (req.query.quality) items = items.filter(item => item.quality === req.query.quality); if (req.query.fishType) items = items.filter(item => item.fishType === req.query.fishType); if (req.query.q) items = items.filter(item => `${item.fishType} ${item.location}`.toLowerCase().includes(req.query.q.toLowerCase())); res.json(await Promise.all(sortNewest(items).map(listingView))); });

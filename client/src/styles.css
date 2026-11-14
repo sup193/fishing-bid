@@ -849,10 +849,11 @@
 .buyer-market{scroll-margin-top:90px}
 .market-product-card .market-product-actions{margin-top:4px}
 .market-product-facts,.market-auction-fact{line-height:1.4}
-.market-pulse-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:8px;margin-top:12px}
+.market-pulse-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:8px;margin-top:12px}
 .market-pulse-stats article{display:grid;gap:4px;padding:9px 12px;border:1px solid #dce8e4;border-top:2px solid #0b9a91;border-radius:10px;background:linear-gradient(145deg,#fff,#f4fbf8);box-shadow:0 4px 12px #164c4509}
 .market-pulse-stats article:nth-child(2){border-top-color:#8065df;background:linear-gradient(145deg,#fff,#f7f4ff)}
 .market-pulse-stats article:nth-child(3){border-top-color:#f06b68;background:linear-gradient(145deg,#fff,#fff5f3)}
+.market-pulse-stats article:nth-child(4){border-top-color:#8065df;background:linear-gradient(145deg,#fff,#f7f4ff)}
 .market-pulse-stats article span,.market-pulse-updated{color:var(--muted);font-size:10px}
 .market-pulse-stats article strong{color:var(--ink);font-size:19px}
 .market-pulse-updated{align-self:center;white-space:nowrap}
@@ -897,7 +898,7 @@
   .market-product-title{min-height:0}
   .category-all-button{align-self:flex-end}
   .guest-hero-copy h1{max-width:570px}
-  .market-pulse-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  .market-pulse-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .market-pulse-stats article{padding:9px}
   .market-pulse-stats article span{font-size:9px}
   .market-pulse-stats article strong{font-size:17px}
@@ -1275,4 +1276,43 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
   .profile-feature-grid>a,.profile-feature-grid>button{padding:10px 8px;gap:7px}
   .profile-feature-grid strong{font-size:10px}
   .profile-feature-grid small{font-size:8px}
+}
+
+.guest-login-ticker{display:flex;align-items:center;gap:16px;width:min(1280px,90%);margin:14px auto 0;padding:10px 15px;border:1px solid #dce7e5;border-radius:10px;background:#fff;box-shadow:0 6px 18px #173a430a}
+.guest-login-ticker-window{min-width:0;flex:1;overflow:hidden}
+.guest-login-ticker-track{display:flex;width:max-content;animation:guest-login-ticker-scroll 24s linear infinite}
+.guest-login-ticker-track span{padding-right:54px;color:var(--ink);font-size:12px;font-weight:800;letter-spacing:.25px;white-space:nowrap}
+.guest-ticker-button{flex:0 0 auto;padding:7px 14px;border:0;border-radius:7px;background:var(--ink);color:#fff;font-size:11px;font-weight:800}
+.guest-ticker-button:hover{background:#245763}
+@keyframes guest-login-ticker-scroll{to{transform:translateX(-50%)}}
+.guest-market{width:min(1280px,90%);margin:0 auto;padding:50px 0 76px}
+.guest-preview .market-section-description{max-width:700px}
+.guest-preview-grid{margin-top:22px}
+.guest-benefits{margin-top:58px;padding:38px;border:1px solid #e5ece8;border-radius:16px;background:#f7faf7}
+.guest-benefits-heading{max-width:650px;margin-bottom:26px}
+.guest-benefits-heading .kicker{margin:0 0 9px}
+.guest-benefits-heading h2,.guest-login-cta h2{margin:0;font-family:'Fraunces',Georgia,serif;font-size:clamp(25px,3vw,34px);letter-spacing:-.7px}
+.guest-benefits-heading>p:last-child,.guest-login-cta>div>p:last-child{margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.7}
+.guest-benefit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
+.guest-benefit-grid article{padding:21px;border:1px solid #e6ece7;border-radius:12px;background:#fff}
+.guest-benefit-grid article>span{display:grid;place-items:center;width:39px;height:39px;border-radius:11px;background:#e4f3ef;color:var(--sea)}
+.guest-benefit-grid h3{margin:14px 0 6px;font-size:14px}
+.guest-benefit-grid p{margin:0;color:var(--muted);font-size:12px;line-height:1.65}
+.guest-login-cta{display:flex;align-items:center;justify-content:space-between;gap:28px;margin-top:24px;padding:30px 34px;border-radius:15px;background:linear-gradient(115deg,#102f39,#15545a);color:#fff}
+.guest-login-cta .kicker{margin:0 0 9px;color:var(--sun)}
+.guest-login-cta>div>p:last-child{max-width:620px;color:#d0dfd9}
+.guest-login-cta .button{flex:0 0 auto}
+@media(max-width:760px){
+  .guest-login-ticker{width:auto;margin:12px 20px 0;padding:9px 10px;gap:9px}
+  .guest-login-ticker-track span{font-size:10px;padding-right:36px}
+  .guest-ticker-button{padding:7px 10px}
+  .guest-market{width:auto;margin:0 20px;padding:34px 0 55px}
+  .guest-benefits{margin-top:38px;padding:23px 18px}
+  .guest-benefit-grid{grid-template-columns:1fr;gap:10px}
+  .guest-benefit-grid article{padding:16px}
+  .guest-login-cta{align-items:flex-start;flex-direction:column;margin-top:16px;padding:24px 20px}
+  .guest-login-cta .button{width:100%}
+}
+@media(prefers-reduced-motion:reduce){
+  .guest-login-ticker-track{animation:none}
 }
