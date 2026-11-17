@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, BadgeCheck, BarChart3, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, ReceiptText, Search, ShoppingBag, Sparkles, Waves } from 'lucide-react';
+import { ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
 import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
@@ -237,6 +237,13 @@ export default function UserApp({ user, onAuth }) {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
   const [bidAmount, setBidAmount] = useState('');
+  const [automaticMax, setAutomaticMax] = useState('');
+  const [automaticEnabled, setAutomaticEnabled] = useState(false);
+  const [bidLoading, setBidLoading] = useState(false);
+  const [automaticLoading, setAutomaticLoading] = useState(false);
+  const [liveAuctionError, setLiveAuctionError] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [notificationError, setNotificationError] = useState('');
   const [checkout, setCheckout] = useState(null);
   const [transactionRefresh, setTransactionRefresh] = useState(0);
   const [dashboardView, setDashboardView] = useState(viewFromHash);
@@ -311,6 +318,85 @@ export default function UserApp({ user, onAuth }) {
   }, [user?.id, user?.role, transactionRefresh]);
 
   useEffect(() => {
+    if (user?.role !== 'buyer') {
+      setNotifications([]);
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      try {
+        const values = await api.notifications();
+        if (active) {
+          setNotifications(values);
+          setNotificationError('');
+        }
+      } catch (error) {
+        if (active) setNotificationError(error.message);
+      }
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.id, user?.role]);
+
+  const selectedAuctionId = selected?.saleMode === 'bid' ? selected.auction?.id : null;
+  useEffect(() => {
+    if (!selectedAuctionId) {
+      setLiveAuctionError('');
+      setAutomaticEnabled(false);
+      setAutomaticMax('');
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      try {
+        const detail = await api.auction(selectedAuctionId);
+        if (!active) return;
+        const updated = {
+          ...detail.listing,
+          auction: detail.auction,
+          bids: detail.bids,
+          activeBidderCount: detail.activeBidderCount
+        };
+        if (detail.auction.minimumBid) {
+          setBidAmount(current => !current || Number(current) < detail.auction.minimumBid
+            ? String(detail.auction.minimumBid)
+            : current);
+        }
+        setSelected(current => current?.auction?.id === selectedAuctionId ? updated : current);
+        setItems(current => current.map(item => item.id === updated.id ? updated : item));
+        setLiveAuctionError('');
+      } catch (error) {
+        if (active) setLiveAuctionError(error.message);
+      }
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [selectedAuctionId]);
+
+  useEffect(() => {
+    if (!selectedAuctionId || user?.role !== 'buyer') return undefined;
+    let active = true;
+    api.automaticBiddingStatus(selectedAuctionId)
+      .then(result => {
+        if (!active) return;
+        setAutomaticEnabled(result.enabled);
+        setAutomaticMax(result.maxAmount ? String(result.maxAmount) : '');
+      })
+      .catch(error => {
+        if (active) setLiveAuctionError(error.message);
+      });
+    return () => { active = false; };
+  }, [selectedAuctionId, user?.id, user?.role]);
+
+  useEffect(() => {
     const interval = window.setInterval(() => setTrendRefresh(value => value + 1), 30000);
     return () => window.clearInterval(interval);
   }, []);
@@ -382,18 +468,71 @@ export default function UserApp({ user, onAuth }) {
   };
   const placeBid = async () => {
     if (!user) return onAuth('login');
+    setBidLoading(true);
     try {
-      await api.bid(selected.auction.id, Number(bidAmount));
+      await api.bid(selected.auction.id, Number(bidAmount), `bid-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
       setTransactionRefresh(value => value + 1);
       setMessageType('success');
       setMessage('Your bid is live.');
       setTrendRefresh(value => value + 1);
-      const updated = await api.listing(selected.id);
+      const detail = await api.auction(selected.auction.id);
+      const updated = { ...detail.listing, auction: detail.auction, bids: detail.bids, activeBidderCount: detail.activeBidderCount };
       setSelected(updated);
       setItems(current => current.map(item => item.id === updated.id ? updated : item));
     } catch (error) {
       setMessageType('error');
       setMessage(error.message);
+    } finally {
+      setBidLoading(false);
+    }
+  };
+
+  const saveAutomaticBidding = async () => {
+    if (!user) return onAuth('login');
+    setAutomaticLoading(true);
+    try {
+      const amount = Number(automaticMax);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid maximum bid amount.');
+      await api.automaticBidding(
+        selected.auction.id,
+        amount,
+        `auto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      );
+      setAutomaticEnabled(true);
+      setMessageType('success');
+      setMessage('Automatic bidding is active. Your maximum stays private.');
+      setTransactionRefresh(value => value + 1);
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message);
+    } finally {
+      setAutomaticLoading(false);
+    }
+  };
+
+  const toggleAutomaticBidding = async () => {
+    if (!user) return onAuth('login');
+    if (!automaticEnabled) return saveAutomaticBidding();
+    setAutomaticLoading(true);
+    try {
+      await api.disableAutomaticBidding(selected.auction.id);
+      setAutomaticEnabled(false);
+      setMessageType('success');
+      setMessage('Automatic bidding has been turned off.');
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message);
+    } finally {
+      setAutomaticLoading(false);
+    }
+  };
+
+  const markNotificationRead = async notification => {
+    try {
+      await api.markNotificationRead(notification.id);
+      setNotifications(current => current.map(item => item.id === notification.id ? { ...item, read: true } : item));
+    } catch (error) {
+      setNotificationError(error.message);
     }
   };
 
@@ -520,6 +659,14 @@ export default function UserApp({ user, onAuth }) {
         <a className={currentView === 'history' ? 'active' : ''} href="#history"><History size={17} /> Bids &amp; orders</a>
         <a className={currentView === 'transactions' ? 'active' : ''} href="#transactions"><ReceiptText size={17} /> Transactions</a>
       </nav>
+      {(notifications.length > 0 || notificationError) && <section className="buyer-notifications" aria-label="Auction notifications">
+        <div className="buyer-notifications-heading"><Bell size={17} /><strong>Auction notifications</strong><span>{notifications.filter(item => !item.read).length} unread</span></div>
+        {notificationError && <p className="notice" role="alert">{notificationError}</p>}
+        {notifications.slice(0, 4).map(notification => <article className={`buyer-notification${notification.read ? ' is-read' : ''}`} key={notification.id}>
+          <div><strong>{notification.title}</strong><p>{notification.message}</p><small>{new Date(notification.createdAt).toLocaleString()}</small></div>
+          {!notification.read && <button type="button" onClick={() => markNotificationRead(notification)} aria-label={`Mark ${notification.title} as read`}>Mark read</button>}
+        </article>)}
+      </section>}
     </>}
     {currentView === 'market' && <>
       {!user && <section className="guest-hero">
@@ -692,27 +839,70 @@ export default function UserApp({ user, onAuth }) {
       </section>
     </div>}
     {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}>
-      <div className="modal" onClick={event => event.stopPropagation()}>
+      <div className={`modal${selected.saleMode === 'bid' ? ' auction-detail-modal' : ''}`} onClick={event => event.stopPropagation()}>
         <button className="close" onClick={() => setSelected(null)}>×</button>
         <ListingPhoto className="detail-photo" item={selected} alt={`${selected.fishType} catch`} />
         <p className="kicker">{selected.saleMode === 'bid' ? bidClosed ? 'BID CLOSED' : 'LIVE BIDDING' : 'DIRECT SALE'}</p>
         <h2>{selected.fishType}, {String(selected.quality || 'ungraded').toLowerCase()} seller grade</h2>
         <p>{selected.quantity} kg from {selected.location}. {selected.description || 'Listing details supplied by the fisherman.'}</p>
+        {selected.saleMode === 'bid' && <p className="auction-seller">Fisherman: <strong>{selected.fisherman?.name || 'Local fisherman'}</strong></p>}
         <p className="quality-safety-note">The quality grade is seller-provided. Any AI image result identifies species only and does not estimate freshness or replace food-safety inspection.</p>
         {priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative rule-based price guide: {priceGuide(selected)}.</strong> This is a simple estimate based on listing details, not an ML prediction, live market quote, or guaranteed price.</p>}
-        {selected.saleMode === 'bid' && <div className="price-readout">
-          <span>Initial price</span><strong>₹{selected.auction?.startPrice || selected.expectedPrice}/kg</strong>
-          <span>Current price</span><strong>₹{selected.auction?.currentPrice || selected.expectedPrice}/kg <small>+{selected.auction?.priceIncreasePercent || 0}%</small></strong>
-        </div>}
+        {selected.saleMode === 'bid' && <>
+          <div className="auction-live-summary">
+            <article><span>Current highest bid</span><strong>₹{Number(selected.auction?.currentPrice || selected.auction?.startPrice || selected.expectedPrice).toLocaleString()}<small>/kg</small></strong></article>
+            <article><span>Time remaining</span><strong>{countdown(selected.auction?.endTime, now)}</strong></article>
+            <article><span>Active bidders</span><strong>{Number(selected.activeBidderCount || 0)}</strong></article>
+            <article><span>Minimum increment</span><strong>₹{Number(selected.auction?.minimumIncrement || 0).toLocaleString()}/kg</strong></article>
+          </div>
+          <p className="auction-status-line">
+            <span className={`auction-status-dot ${bidClosed ? 'is-closed' : ''}`} />
+            Status: <strong>{selected.auction?.status || (bidClosed ? 'completed' : 'active')}</strong>
+            {selected.auction?.currentBidder?.name && <> · Leading bidder: <strong>{selected.auction.currentBidder.name}</strong></>}
+          </p>
+          {Date.parse(selected.auction?.endTime) - now <= 5 * 60_000 && Date.parse(selected.auction?.endTime) > now
+            && <p className="auction-closing-note"><Clock3 size={15} /> Closing soon. A valid bid in the final 30 seconds extends the auction by 30 seconds.</p>}
+          {liveAuctionError && <p className="notice" role="alert">Live auction update unavailable: {liveAuctionError}</p>}
+          <section className="auction-bid-history" aria-label="Complete bid history">
+            <div className="auction-panel-heading"><h3>Bid history</h3><span>{selected.bids?.length || 0} bids</span></div>
+            {selected.bids?.length
+              ? <div className="auction-bid-list">{selected.bids.map(bid => <article className="auction-bid-row" key={bid.id}>
+                <span className="auction-bid-avatar">{String(bid.buyer?.name || 'B').trim().charAt(0).toUpperCase()}</span>
+                <div><strong>{bid.buyer?.name || 'Buyer'}</strong><small>{new Date(bid.createdAt).toLocaleString()} · {bid.type === 'automatic' ? 'Automatic bid' : 'Manual bid'}</small></div>
+                <strong>₹{Number(bid.amount).toLocaleString()}/kg</strong>
+              </article>)}</div>
+              : <p className="empty auction-empty">No bids yet. The starting price is ₹{Number(selected.auction?.startPrice || 0).toLocaleString()}/kg.</p>}
+          </section>
+          {!bidClosed && user?.role === 'buyer' && <>
+            <div className="auction-bid-form">
+              <label htmlFor="manual-bid-amount">Manual bid (₹ per kg)</label>
+              <div className="bid-box">
+                <input id="manual-bid-amount" type="number" min={selected.auction?.minimumBid || Number(selected.auction?.currentPrice || 0) + Number(selected.auction?.minimumIncrement || 1)} step="0.01" placeholder="Enter your bid" value={bidAmount} onChange={event => setBidAmount(event.target.value)} />
+                <button className="button primary" disabled={bidLoading || !bidAmount} onClick={placeBid}><Gavel size={17} /> {bidLoading ? 'Bidding…' : 'Place bid'}</button>
+              </div>
+            </div>
+            <section className="automatic-bid-panel">
+              <div className="automatic-bid-heading"><div><p className="kicker">BID ON YOUR BEHALF</p><h3>Automatic bidding</h3></div><label className="automatic-bid-toggle"><input type="checkbox" checked={automaticEnabled} onChange={toggleAutomaticBidding} disabled={automaticLoading} /><span>{automaticEnabled ? 'On' : 'Off'}</span></label></div>
+              <p>We raise your bid only when needed and never above your private maximum.</p>
+              <label htmlFor="automatic-bid-maximum">Your maximum bid (₹ per kg)</label>
+              <input id="automatic-bid-maximum" type="number" min={selected.auction?.minimumBid || Number(selected.auction?.currentPrice || 0) + Number(selected.auction?.minimumIncrement || 1)} step="0.01" value={automaticMax} onChange={event => setAutomaticMax(event.target.value)} placeholder="Set your maximum" />
+              <button className="button secondary full" type="button" disabled={automaticLoading || !automaticMax} onClick={saveAutomaticBidding}>{automaticLoading ? 'Saving…' : automaticEnabled ? 'Update maximum bid' : 'Activate automatic bidding'}</button>
+              <small>Your limit is private and is never shown to other buyers.</small>
+            </section>
+          </>}
+          {!bidClosed && user?.role !== 'buyer' && <button className="button primary full" onClick={() => onAuth('login')}>Log in to place a bid</button>}
+        </>}
         {selected.saleMode === 'bid' && !bidClosed
-          ? <div className="bid-box"><input type="number" min={(selected.auction?.currentPrice || selected.expectedPrice) + 1} placeholder="Increase price / kg" value={bidAmount} onChange={event => setBidAmount(event.target.value)} /><button className="button primary" onClick={placeBid}><Gavel size={17} /> Bid</button></div>
+          ? null
           : selected.saleMode === 'sale' && selected.status === 'available'
             ? <button className="button primary full" onClick={() => user ? setCheckout({ type: 'buyout' }) : onAuth('login')}><ShoppingBag size={17} /> Buy now · ₹{selected.salePrice || selected.expectedPrice}/kg</button>
             : bidClosed
-              ? <button className="button primary full" onClick={() => user ? setCheckout({ type: 'auction' }) : onAuth('login')}>Checkout winning bid</button>
+              ? selected.auction?.winner && selected.auction.winner === user?.id
+                ? <button className="button primary full" onClick={() => setCheckout({ type: 'auction' })}><Trophy size={17} /> Checkout winning bid</button>
+                : <p className="form-hint">{selected.auction?.winner ? 'The auction is complete. Another buyer won this catch.' : 'The auction closed without bids.'}</p>
               : <p className="form-hint">Bidding has stopped. The winning buyer can complete checkout.</p>}
         {selected.imageVerification === 'verified' && <p className="verification">Image status marked complete · not a species, freshness, or food-safety check</p>}
-        {message && <p className="form-error">{message}</p>}
+        {message && <p className={messageType === 'success' ? 'success-notice' : 'notice'} role="status">{message}</p>}
       </div>
     </div>}
     {checkout && <CheckoutForm type={checkout.type} onClose={() => setCheckout(null)} onSubmit={startPayment} />}

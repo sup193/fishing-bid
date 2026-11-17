@@ -4,7 +4,7 @@ The Expo app uses Expo Router for role-based navigation and Expo SecureStore for
 
 ## Mobile workspaces
 
-- **Buyer:** browse fixed-price and auction listings, compare auction/listing/verified-sales price trends, place auction bids, see recommendations, review bids and orders, and view payment transactions.
+- **Buyer:** browse fixed-price and auction listings, compare auction/listing/verified-sales price trends, place manual or automatic bids with a private maximum, follow live bid history and countdowns, receive auction notifications, see recommendations, review bids and orders, and view payment transactions.
 - **Fisherman:** post fixed-price or auction listings, stop auctions, review buyer orders, advance paid orders through processing/delivery/completion, view verified sales, monitor bids, and review transactions.
 - **Admin:** view marketplace totals and recent orders, moderate listings, manage fisherman accounts, review buyer registration requests, monitor bids, and review transactions.
 

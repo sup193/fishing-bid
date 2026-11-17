@@ -1,4 +1,5 @@
-import { get, insert, list, update, where, sortAmount } from './db.js';
+import { get, insert, list, where, sortAmount, transact } from './db.js';
+import { auctionBidderIds } from './auctionBidding.js';
 
 export const FISH_TYPES = [
   'Tuna', 'Pomfret', 'Mackerel', 'Sardine', 'Prawns', 'Kingfish', 'Crab', 'Squid', 'Lobster', 'Clams', 'Mussels', 'Oysters', 'Anchovy', 'Seer Fish',
@@ -51,26 +52,121 @@ export function assessBidRisk(bid, auctionBids, auction) {
 }
 
 export async function refreshAuction(auction) {
-  if (auction.status === 'cancelled') return auction;
-  const now = new Date();
-  const status = now < new Date(auction.startTime) ? 'scheduled' : now < new Date(auction.endTime) ? 'active' : 'completed';
-  const changed = { status };
-  if (status === 'completed') {
-    const bids = sortAmount(where(await list('bids'), { auction: auction.id }));
-    const best = bids[0];
-    if (best) {
-      const listing = await get('listings', auction.listing);
-      changed.winner = best.buyer;
-      changed.winningBid = best.amount;
-      if (listing) {
-        await update('listings', listing.id, { status: listing.saleMode === 'bid' ? 'auction' : 'sold' });
-        const existing = (await list('orders')).find(order => order.auction === auction.id);
-        if (!existing) await insert('orders', { orderNumber: `TM-${Date.now()}`, auction: auction.id, listing: listing.id, buyer: best.buyer, fisherman: listing.fisherman, quantity: listing.quantity, amount: best.amount * listing.quantity, paymentStatus: 'pending', orderStatus: 'awaiting-checkout', purchaseType: '', address: '', paymentMethod: '' }, `auction_${auction.id}`);
-      }
-    } else {
-      changed.result = 'no-bids';
-    }
+  if (!auction?.id) {
+    console.error('Auction settlement skipped: auction record has no ID');
+    return auction;
   }
-  const updated = await update('auctions', auction.id, changed);
-  return { ...auction, ...updated };
+  const legacyBids = sortAmount(where(await list('bids'), { auction: auction.id }));
+  const fallbackBid = legacyBids[0] || null;
+  const now = Date.now();
+  let invalidAuctionData = false;
+  const result = await transact('auctions', auction.id, current => {
+    if (!current || current.status === 'cancelled') return;
+    const startsAt = Date.parse(current.startTime);
+    const endsAt = Date.parse(current.endTime);
+    const currentPrice = Number(current.currentPrice || fallbackBid?.amount || current.startPrice || 0);
+    if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt
+      || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+      invalidAuctionData = true;
+      return;
+    }
+    if (current.status === 'completed') return;
+    const status = now < startsAt ? 'scheduled' : now < endsAt ? 'active' : 'completed';
+    const currentBidder = current.currentBidder || fallbackBid?.buyer || null;
+    const bidCount = Math.max(Number(current.bidCount || 0), legacyBids.length);
+    if (status === current.status && currentBidder === current.currentBidder
+      && currentPrice === Number(current.currentPrice || 0)
+      && bidCount === Number(current.bidCount || 0)) return;
+    return {
+      ...current,
+      status,
+      currentBidder,
+      currentPrice,
+      bidCount,
+      ...(status === 'completed' ? {
+        winner: currentBidder,
+        winningBid: currentBidder ? currentPrice : null,
+        result: currentBidder ? 'sold' : 'no-bids',
+        closedAt: current.closedAt || new Date(now).toISOString()
+      } : {})
+    };
+  });
+  let updated = result.value || await get('auctions', auction.id) || auction;
+  if (invalidAuctionData) {
+    console.error(`Auction settlement skipped for ${auction.id}: invalid timer or current price`);
+    return updated;
+  }
+  if (updated.status === 'completed') {
+    const listing = await get('listings', updated.listing);
+    if (listing && updated.winner) {
+      const quantity = Number(listing.quantity);
+      const winningPrice = Number(updated.winningBid);
+      if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(winningPrice) || winningPrice <= 0) {
+        console.error(`Auction order skipped for ${updated.id}: invalid quantity or winning price`);
+        return updated;
+      }
+      const existing = (await list('orders')).find(order => order.auction === updated.id);
+      if (!existing) {
+        const order = await insert('orders', {
+          orderNumber: `TM-${Date.now()}`,
+          auction: updated.id,
+          listing: listing.id,
+          buyer: updated.winner,
+          fisherman: listing.fisherman,
+          quantity,
+          amount: winningPrice * quantity,
+          paymentStatus: 'pending',
+          orderStatus: 'awaiting-checkout',
+          purchaseType: 'auction',
+          address: '',
+          paymentMethod: ''
+        }, `auction_${updated.id}`);
+        updated.order = order.id;
+      } else {
+        updated.order = existing.id;
+      }
+    }
+
+    if (!updated.closureNotificationsSent) {
+      const recipients = auctionBidderIds(updated, legacyBids);
+      const winner = updated.winner;
+      for (const recipient of recipients) {
+        const won = recipient === winner;
+        await insert('notifications', {
+          user: recipient,
+          auction: updated.id,
+          type: won ? 'auction_won' : 'auction_lost',
+          title: won ? 'You won the auction' : 'Auction ended',
+          message: won
+            ? `You won at ₹${Number(updated.winningBid).toLocaleString()}/kg. Your checkout is ready.`
+            : `${listing?.fishType || 'The auction'} ended at ₹${Number(updated.winningBid || 0).toLocaleString()}/kg.`,
+          read: false
+        }, `close_${updated.id}_${recipient}`);
+      }
+      const marked = await transact('auctions', updated.id, current => {
+        if (!current?.closedAt || current.closureNotificationsSent) return;
+        return { ...current, closureNotificationsSent: true };
+      });
+      updated = marked.value || updated;
+    }
+  } else if (updated.status === 'active' && Date.parse(updated.endTime) - now <= 5 * 60_000
+    && Date.parse(updated.endTime) > now && !updated.closingNoticeSentAt) {
+    const recipients = auctionBidderIds(updated, legacyBids);
+    for (const recipient of recipients) {
+      await insert('notifications', {
+        user: recipient,
+        auction: updated.id,
+        type: 'auction_closing_soon',
+        title: 'Auction closing soon',
+        message: 'This auction is scheduled to close within five minutes.',
+        read: false
+      }, `closing_${updated.id}_${recipient}`);
+    }
+    const marked = await transact('auctions', updated.id, current => {
+      if (!current || current.closingNoticeSentAt || current.status !== 'active') return;
+      return { ...current, closingNoticeSentAt: new Date(now).toISOString() };
+    });
+    updated = marked.value || updated;
+  }
+  return updated;
 }

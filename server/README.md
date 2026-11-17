@@ -2,6 +2,8 @@
 
 Express + Firebase Realtime Database API for the React client. Configure Firebase Admin credentials in the root `.env`, then use `npm run dev`.
 
+Auction bidding and maximum-bid updates run through authenticated API routes and Firebase Realtime Database transactions. Public auction responses omit private bidder offers and automatic-bid limits. Deploy the repository's `database.rules.json` with rules that deny direct client reads and writes; the Admin SDK used by this server bypasses client rules. The API also supports the local JSON database for development, which is not a multi-process concurrency store.
+
 To replace bids, orders, and payment records with demo activity in the local database, run:
 
 ```sh

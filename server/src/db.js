@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 let app;
-const localDbPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/local-db.json');
+const localDbPath = path.resolve(process.env.TIDEMARKET_LOCAL_DB_PATH
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/local-db.json'));
 
 function serviceAccount() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
@@ -67,14 +68,35 @@ export async function get(collection, id) {
 }
 
 export async function list(collection) {
+  let items;
   if (useLocalDatabase()) {
     const store = readLocalDb();
     const value = store[collection] || {};
-    return Object.entries(value).map(([id, item]) => ({ id, ...item }));
+    items = Object.entries(value).map(([id, item]) => ({ id, ...item }));
+    if (collection === 'bids') {
+      for (const [auctionId, auction] of Object.entries(store.auctions || {})) {
+        for (const [id, bid] of Object.entries(auction.bidHistory || {})) {
+          items.push({ id, auction: auctionId, ...bid });
+        }
+      }
+    }
+  } else {
+    const snapshot = await initFirebase().ref(collection).get();
+    const value = snapshot.val() || {};
+    items = Object.entries(value).map(([id, item]) => ({ id, ...item }));
+    if (collection === 'bids') {
+      const auctions = await initFirebase().ref('auctions').get();
+      for (const [auctionId, auction] of Object.entries(auctions.val() || {})) {
+        for (const [id, bid] of Object.entries(auction.bidHistory || {})) {
+          items.push({ id, auction: auctionId, ...bid });
+        }
+      }
+    }
   }
-  const snapshot = await initFirebase().ref(collection).get();
-  const value = snapshot.val() || {};
-  return Object.entries(value).map(([id, item]) => ({ id, ...item }));
+  if (collection !== 'bids') return items;
+  const unique = new Map();
+  for (const bid of items) unique.set(bid.id, bid);
+  return [...unique.values()];
 }
 
 function removeUndefined(value) { if (Array.isArray(value)) return value.map(removeUndefined); if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, removeUndefined(item)])); return value; }
@@ -109,6 +131,35 @@ export async function update(collection, id, data) {
   const record = cleanRecord({ ...data, updatedAt: new Date().toISOString() });
   await initFirebase().ref(`${collection}/${id}`).update(record);
   return get(collection, id);
+}
+
+export async function transact(collection, id, transform) {
+  if (useLocalDatabase()) {
+    const store = readLocalDb();
+    const current = store[collection]?.[id] || null;
+    const next = transform(current ? { id, ...current } : null);
+    if (next === undefined || next === null) return { committed: false, value: current ? { id, ...current } : null };
+    const { id: ignoredId, ...record } = next;
+    const cleaned = cleanRecord(record);
+    if (JSON.stringify(cleaned) === JSON.stringify(current || null)) {
+      return { committed: false, value: current ? { id, ...current } : null };
+    }
+    store[collection] ??= {};
+    store[collection][id] = cleaned;
+    writeLocalDb(store);
+    return { committed: true, value: { id, ...cleaned } };
+  }
+  const result = await initFirebase().ref(`${collection}/${id}`).transaction(current => {
+    if (current === null) return;
+    const next = transform({ id, ...current });
+    if (next === undefined || next === null) return;
+    const { id: ignoredId, ...record } = next;
+    return cleanRecord(record);
+  }, undefined, false);
+  return {
+    committed: result.committed,
+    value: result.snapshot.exists() ? { id, ...result.snapshot.val() } : null
+  };
 }
 
 export async function reserveListing(id, buyerId) {

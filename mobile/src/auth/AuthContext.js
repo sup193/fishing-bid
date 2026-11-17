@@ -1,9 +1,32 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { mobileApi } from '../../api';
 
 const TOKEN_KEY = 'tide_token';
 const AuthContext = createContext(null);
+
+function getStoredToken() {
+  return Platform.OS === 'web'
+    ? Promise.resolve(globalThis.localStorage.getItem(TOKEN_KEY))
+    : SecureStore.getItemAsync(TOKEN_KEY);
+}
+
+function storeToken(token) {
+  if (Platform.OS === 'web') {
+    globalThis.localStorage.setItem(TOKEN_KEY, token);
+    return Promise.resolve();
+  }
+  return SecureStore.setItemAsync(TOKEN_KEY, token);
+}
+
+function deleteStoredToken() {
+  if (Platform.OS === 'web') {
+    globalThis.localStorage.removeItem(TOKEN_KEY);
+    return Promise.resolve();
+  }
+  return SecureStore.deleteItemAsync(TOKEN_KEY);
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -19,7 +42,7 @@ export function AuthProvider({ children }) {
       setChecking(true);
       setError('');
       try {
-        const savedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+        const savedToken = await getStoredToken();
         if (!active || !savedToken) return;
         const result = await mobileApi.me(savedToken);
         if (active) {
@@ -31,7 +54,7 @@ export function AuthProvider({ children }) {
         if (!active) return;
         if (restoreError.status === 401) {
           try {
-            await SecureStore.deleteItemAsync(TOKEN_KEY);
+            await deleteStoredToken();
             mobileApi.setToken(null);
           } catch (storageError) {
             setError(storageError.message);
@@ -50,7 +73,7 @@ export function AuthProvider({ children }) {
 
   const signIn = useCallback(async credentials => {
     const result = await mobileApi.login(credentials);
-    await SecureStore.setItemAsync(TOKEN_KEY, result.token);
+    await storeToken(result.token);
     mobileApi.setToken(result.token);
     setToken(result.token);
     setUser(result.user);
@@ -59,7 +82,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await deleteStoredToken();
     mobileApi.setToken(null);
     setToken(null);
     setUser(null);

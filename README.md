@@ -49,11 +49,15 @@ All demo accounts use the password `TideDemo!2026`:
 
 ### Mobile app
 
-The Expo app has role-specific tabs for buyers, fishermen, and admins, including marketplace browsing, bidding, the auction/listing/verified-sales trend chart, listing and order management, buyer approvals, moderation, bid review, and transaction history. See [mobile/README.md](./mobile/README.md) for setup instructions. Native Razorpay checkout is not enabled yet; buyers can use the website to complete a payment.
+The Expo app has role-specific tabs for buyers, fishermen, and admins, including marketplace browsing, manual and automatic auction bidding, live auction details and notices, the auction/listing/verified-sales trend chart, listing and order management, buyer approvals, moderation, bid review, and transaction history. See [mobile/README.md](./mobile/README.md) for setup instructions. Native Razorpay checkout is not enabled yet; buyers can use the website to complete a payment.
 
 ### Auction settlement and bid review
 
 The API checks auctions on startup and every 15 seconds. When an auction reaches its end time, it closes automatically, records the highest bidder as the winner, and creates a pending checkout order. A fisherman can also stop bidding early from Inventory; the same winner settlement runs immediately. Fishermen can review auction history in **Bid history**, and administrators can review all auctions under **Bid review**.
+
+Buyer auction details poll the API for live bid history and timer updates. Manual bids and automatic maximums are validated and serialized in an auction-record transaction. Automatic limits and bidder offer ceilings are stored privately under each auction and removed from public API responses; each accepted leading bid is also mirrored to the existing `bids` node for dashboard and history compatibility. Automatic bidding raises the public price only as needed, breaks equal maximums in favor of the earlier eligible offer, and never bids above a buyer's configured limit. A valid bid in the final 30 seconds extends the server-owned end time by 30 seconds. Auction results use the transactionally stored leader and price, then create the existing pending Razorpay checkout order.
+
+The API stores auction activity in `auctions/{id}` (`currentPrice`, `currentBidder`, `bidCount`, `bidderOffers`, `autoBids`, `bidHistory`, and request de-duplication keys), mirrors bid records to `bids`, and writes buyer notices to `notifications`. The maximum amounts are private application data and are not returned by public listing or auction endpoints. Deploy [database.rules.json](./database.rules.json) to Firebase Realtime Database to deny direct client reads and writes; the server's Firebase Admin SDK continues to perform authorized operations. Do not give browser or mobile clients Firebase Admin credentials.
 
 New bids are flagged for human review when one buyer places at least five bids in 60 seconds, or when a bid is at least twice the previous high and exceeds it by at least five minimum increments. These are review signals, not proof of fraud; bids are not blocked automatically. The bid review screens show the full bid timeline and flagged activity.
 

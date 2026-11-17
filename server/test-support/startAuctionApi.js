@@ -1,0 +1,24 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createAuctionDatabase } from './auctionTestData.js';
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-auction-api-'));
+const databasePath = path.join(tempDir, 'local-db.json');
+process.env.TIDEMARKET_DATABASE = 'local';
+process.env.TIDEMARKET_LOCAL_DB_PATH = databasePath;
+process.env.JWT_SECRET = 'test-only-auction-jwt-secret';
+process.env.CLIENT_URL = '*';
+process.env.PORT = '5000';
+process.env.RAZORPAY_KEY_ID = '';
+process.env.RAZORPAY_KEY_SECRET = '';
+process.env.RAZORPAY_WEBHOOK_SECRET = '';
+delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+delete process.env.FIREBASE_CLIENT_EMAIL;
+delete process.env.FIREBASE_PRIVATE_KEY;
+delete process.env.FIREBASE_PROJECT_ID;
+delete process.env.FIREBASE_DATABASE_URL;
+await createAuctionDatabase(databasePath);
+process.on('exit', () => fs.rmSync(tempDir, { recursive: true, force: true }));
+const { startServer } = await import('../src/index.js');
+await startServer();

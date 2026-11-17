@@ -6,10 +6,12 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { get, insert, list, update, remove, reserveListing, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { randomUUID } from 'node:crypto';
+import { get, insert, list, update, remove, reserveListing, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { allow, requireAuth, signUser } from '../auth.js';
 import { FISH_TYPES, QUALITIES, SIZES, assessBidRisk, predictPrice, refreshAuction } from '../utils.js';
+import { applyAuctionOffer, auctionBidderIds, minimumBidFor, publicAuction, recalculateAuctionOffers } from '../auctionBidding.js';
 import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
 
 const router = express.Router();
@@ -53,7 +55,7 @@ const fishermanFor = async id => sanitizeUser(await get('users', id));
 const listingView = async listing => {
   const auction = (await list('auctions')).find(item => item.listing === listing.id) || null;
   const bids = auction ? sortAmount(where(await list('bids'), { auction: auction.id })) : [];
-  const currentPrice = bids[0]?.amount || auction?.startPrice || listing.salePrice || listing.expectedPrice;
+  const currentPrice = Number(auction?.currentPrice || bids[0]?.amount || auction?.startPrice || listing.salePrice || listing.expectedPrice);
   const guide = predictPrice(listing.fishType, Number(listing.quantity), listing.quality, listing.size);
   const storedLow = Number(listing.predictedLow);
   const storedHigh = Number(listing.predictedHigh);
@@ -63,9 +65,155 @@ const listingView = async listing => {
     predictedLow: hasStoredGuide ? storedLow : guide.low,
     predictedHigh: hasStoredGuide ? storedHigh : guide.high,
     fisherman: await fishermanFor(listing.fisherman),
-    auction: auction ? { ...auction, bidCount: bids.length, currentPrice, priceIncreasePercent: auction.startPrice ? +(((currentPrice - auction.startPrice) / auction.startPrice) * 100).toFixed(2) : 0 } : null
+    auction: auction ? {
+      ...publicAuction(auction),
+      bidCount: Number(auction.bidCount || bids.length),
+      currentPrice,
+      priceIncreasePercent: auction.startPrice ? +(((currentPrice - auction.startPrice) / auction.startPrice) * 100).toFixed(2) : 0
+    } : null
   };
 };
+
+function legacyAuctionState(auction, bids) {
+  if (auction.bidHistory) return auction;
+  const bidderOffers = {};
+  const bidHistory = {};
+  const chronologicalBids = [...bids].sort((left, right) => Date.parse(left.createdAt || 0) - Date.parse(right.createdAt || 0));
+  let offerSequence = 0;
+  for (const bid of chronologicalBids) {
+    bidHistory[bid.id] = { ...bid, type: bid.type || 'manual' };
+    const previous = bidderOffers[bid.buyer];
+    if (!previous || Number(bid.amount) > Number(previous.amount)) {
+      offerSequence += 1;
+      bidderOffers[bid.buyer] = {
+        amount: Number(bid.amount),
+        source: 'manual',
+        sequence: offerSequence,
+        createdAt: bid.createdAt || ''
+      };
+    }
+  }
+  const high = sortAmount(bids)[0];
+  return {
+    ...auction,
+    currentPrice: Number(auction.currentPrice || high?.amount || auction.startPrice),
+    currentBidder: auction.currentBidder || high?.buyer || null,
+    bidCount: Number(auction.bidCount || bids.length),
+    bidderOffers: auction.bidderOffers || bidderOffers,
+    offerSequence: Number(auction.offerSequence || offerSequence),
+    bidHistory,
+    autoBids: auction.autoBids || {},
+    processedRequests: auction.processedRequests || {}
+  };
+}
+
+async function notifyBidParticipants({ auction, bid, previousBidder, actorId, legacyBids, extended }) {
+  if (!bid) return;
+  const recipients = auctionBidderIds(auction, legacyBids);
+  const messages = new Map();
+  if (previousBidder && previousBidder !== auction.currentBidder) {
+    messages.set(previousBidder, {
+      type: 'outbid',
+      title: 'You have been outbid',
+      message: `The current bid is now ₹${Number(auction.currentPrice).toLocaleString()}/kg.`
+    });
+  }
+  for (const recipient of recipients) {
+    if (recipient !== auction.currentBidder && recipient !== actorId && !messages.has(recipient)) {
+      messages.set(recipient, {
+        type: 'new_higher_bid',
+        title: 'A higher bid was placed',
+        message: `The current bid is now ₹${Number(auction.currentPrice).toLocaleString()}/kg.`
+      });
+    }
+  }
+  if (auction.currentBidder) {
+    messages.set(auction.currentBidder, {
+      type: 'highest_bidder',
+      title: 'You are the highest bidder',
+      message: `You are currently leading at ₹${Number(auction.currentPrice).toLocaleString()}/kg.`
+    });
+  }
+  if (extended && auction.currentBidder) {
+    const existing = messages.get(auction.currentBidder);
+    messages.set(auction.currentBidder, {
+      type: existing?.type || 'auction_extended',
+      title: existing?.title || 'Auction timer extended',
+      message: `A valid bid in the final 30 seconds extended the auction by 30 seconds.`
+    });
+  }
+  for (const [recipient, notification] of messages) {
+    const id = `bid_${bid.id}_${recipient}_${notification.type}`;
+    await insert('notifications', { ...notification, user: recipient, auction: auction.id, bid: bid.id, read: false }, id);
+  }
+}
+
+async function submitAuctionOffer({ auction, amount, buyerId, mode, requestId }) {
+  const legacyBids = where(await list('bids'), { auction: auction.id });
+  const bidId = randomUUID();
+  const now = Date.now();
+  let failure = null;
+  let operation = null;
+  const result = await transact('auctions', auction.id, current => {
+    if (!current) {
+      failure = 'Auction not found';
+      return;
+    }
+    operation = applyAuctionOffer(legacyAuctionState(current, legacyBids), {
+      buyerId,
+      amount,
+      mode,
+      bidId,
+      requestId,
+      now
+    });
+    if (operation.error) {
+      failure = operation.error;
+      return;
+    }
+    return operation.auction;
+  });
+  if (!result.committed && !operation?.duplicate) return { error: failure || 'Auction changed while placing your bid. Please try again.' };
+  const updatedAuction = result.value;
+  const bid = updatedAuction.bidHistory?.[bidId] || operation?.bid || null;
+  if (bid && !operation?.duplicate) {
+    const existing = legacyBids.find(item => item.id === bid.id);
+    if (!existing) {
+      const risk = assessBidRisk(bid, [...legacyBids, bid], updatedAuction);
+      try {
+        await insert('bids', {
+          ...bid,
+          riskReviewNeeded: risk.reviewNeeded,
+          riskFlags: risk.flags
+        }, bid.id);
+      } catch (error) {
+        console.error(`Bid history mirror failed for ${bid.id}:`, error);
+      }
+    }
+    try {
+      await notifyBidParticipants({
+        auction: updatedAuction,
+        bid,
+        previousBidder: operation.previousBidder,
+        actorId: buyerId,
+        legacyBids,
+        extended: operation.extended
+      });
+    } catch (error) {
+      console.error(`Bid notification delivery failed for ${bid.id}:`, error);
+    }
+  }
+  return {
+    response: {
+      message: operation?.duplicate ? 'This bid was already processed' : 'Bid accepted',
+      bid,
+      auction: publicAuction(updatedAuction),
+      activeBidderCount: auctionBidderIds(updatedAuction, legacyBids).length,
+      extended: Boolean(operation?.extended),
+      duplicate: Boolean(operation?.duplicate)
+    }
+  };
+}
 
 async function beginRazorpayPayment(order, address) {
   const amount = Math.round(Number(order.amount) * 100);
@@ -228,24 +376,165 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => { 
 router.get('/fisherman/listings', requireAuth, allow('fisherman'), async (req, res) => res.json(await Promise.all(sortNewest(where(await list('listings'), { fisherman: req.user.id })).map(listingView))));
 router.get('/fisherman/sales', requireAuth, allow('fisherman'), async (req, res) => { const orders = sortNewest(where(await list('orders'), { fisherman: req.user.id })); const listings = await list('listings'); res.json(orders.map(order => ({ ...order, listingDetails: listings.find(listing => listing.id === order.listing) || null }))); });
 router.delete('/listings/:id', requireAuth, allow('fisherman'), async (req, res) => { const listing = await get('listings', req.params.id); if (!listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Listing not found' }); const linkedOrder = (await list('orders')).find(order => order.listing === listing.id); if (linkedOrder || ['sold', 'auction'].includes(listing.status)) return res.status(409).json({ message: 'This listing cannot be deleted because it has an active bid or sale record.' }); const auction = (await list('auctions')).find(item => item.listing === listing.id); if (auction) await remove('auctions', auction.id); await remove('listings', listing.id); res.json({ message: 'Listing deleted' }); });
-router.post('/listings/:id/auction', requireAuth, allow('fisherman'), async (req, res) => { const listing = await get('listings', req.params.id); if (!listing || listing.fisherman !== req.user.id || listing.status !== 'available') return res.status(400).json({ message: 'Listing is unavailable' }); const auction = await insert('auctions', { listing: listing.id, startPrice: Number(req.body.startPrice), minimumIncrement: Number(req.body.minimumIncrement || 10), startTime: req.body.startTime, endTime: req.body.endTime, status: 'scheduled' }); await update('listings', listing.id, { status: 'auction' }); res.status(201).json(auction); });
-router.get('/auctions/:id', async (req, res) => { let auction = await get('auctions', req.params.id); if (!auction) return res.status(404).json({ message: 'Auction not found' }); auction = await refreshAuction(auction); const listing = await get('listings', auction.listing); if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' }); const bids = sortAmount(where(await list('bids'), { auction: auction.id })).map(item => ({ ...item, buyer: sanitizeUser(null) })); for (const bid of bids) bid.buyer = sanitizeUser(await get('users', bid.buyer)); res.json({ auction, listing: await listingView(listing), bids }); });
+router.post('/listings/:id/auction', requireAuth, allow('fisherman'), async (req, res) => {
+  const listing = await get('listings', req.params.id);
+  if (!listing || listing.fisherman !== req.user.id || listing.status !== 'available') return res.status(400).json({ message: 'Listing is unavailable' });
+  const startPrice = Number(req.body.startPrice);
+  const minimumIncrement = Number(req.body.minimumIncrement || 10);
+  const startTime = Date.parse(req.body.startTime);
+  const endTime = Date.parse(req.body.endTime);
+  if (!Number.isFinite(startPrice) || startPrice <= 0 || !Number.isSafeInteger(Math.round(startPrice * 100))
+    || Math.abs(startPrice * 100 - Math.round(startPrice * 100)) >= 1e-7
+    || !Number.isFinite(minimumIncrement) || minimumIncrement <= 0
+    || !Number.isSafeInteger(Math.round(minimumIncrement * 100))
+    || Math.abs(minimumIncrement * 100 - Math.round(minimumIncrement * 100)) >= 1e-7) {
+    return res.status(400).json({ message: 'Starting price and minimum increment must be positive amounts with at most two decimal places' });
+  }
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime < Date.now() - 60_000 || endTime <= Date.now() || endTime <= startTime) {
+    return res.status(400).json({ message: 'Auction start and end times are invalid' });
+  }
+  const auction = await insert('auctions', {
+    listing: listing.id,
+    startPrice,
+    currentPrice: startPrice,
+    currentBidder: null,
+    bidCount: 0,
+    minimumIncrement,
+    startTime: new Date(startTime).toISOString(),
+    endTime: new Date(endTime).toISOString(),
+    status: 'scheduled',
+    bidderOffers: {},
+    autoBids: {},
+    offerSequence: 0,
+    bidHistory: {},
+    processedRequests: {}
+  });
+  await update('listings', listing.id, { status: 'auction' });
+  res.status(201).json(publicAuction(auction));
+});
+router.get('/auctions/:id', async (req, res) => {
+  let auction = await get('auctions', req.params.id);
+  if (!auction) return res.status(404).json({ message: 'Auction not found' });
+  auction = await refreshAuction(auction);
+  const listing = await get('listings', auction.listing);
+  if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' });
+  const legacyBids = sortAmount(where(await list('bids'), { auction: auction.id }));
+  const sourceBids = Object.values(auction.bidHistory || {}).length
+    ? Object.values(auction.bidHistory)
+    : legacyBids;
+  const bidders = new Map();
+  for (const bid of sourceBids) {
+    const buyer = await get('users', bid.buyer);
+    bidders.set(bid.buyer, buyer ? { id: buyer.id, name: buyer.name || 'Buyer' } : { id: bid.buyer, name: 'Buyer' });
+  }
+  const bids = [...sourceBids]
+    .map(bid => ({ ...bid, buyer: bidders.get(bid.buyer) }))
+    .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0));
+  const leader = auction.currentBidder ? bidders.get(auction.currentBidder) || await get('users', auction.currentBidder) : null;
+  res.json({
+    auction: {
+      ...publicAuction(auction),
+      currentBidder: leader ? { id: leader.id, name: leader.name } : null,
+      minimumBid: minimumBidFor(auction)
+    },
+    listing: await listingView(listing),
+    bids,
+    activeBidderCount: auctionBidderIds(auction, legacyBids).length
+  });
+});
 router.post('/auctions/:id/bids', requireAuth, allow('buyer'), async (req, res) => {
   const auction = await get('auctions', req.params.id);
   if (!auction) return res.status(404).json({ message: 'Auction not found' });
   const listing = await get('listings', auction.listing);
   if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' });
-  const refreshedAuction = await refreshAuction(auction);
-  const bids = where(await list('bids'), { auction: auction.id });
-  const high = sortAmount(bids)[0];
-  const minimum = Number(high?.amount || auction.startPrice) + Number(auction.minimumIncrement);
   const amount = Number(req.body.amount);
-  if (refreshedAuction.status !== 'active') return res.status(400).json({ message: 'This auction is closed' });
-  if (!Number.isFinite(amount) || amount < minimum) return res.status(400).json({ message: `Bid must be at least Rs ${minimum.toFixed(2)}` });
-  const createdAt = new Date().toISOString();
-  const proposedBid = { auction: auction.id, buyer: req.user.id, amount, createdAt };
-  const risk = assessBidRisk(proposedBid, [...bids, proposedBid], refreshedAuction);
-  res.status(201).json(await insert('bids', { ...proposedBid, riskReviewNeeded: risk.reviewNeeded, riskFlags: risk.flags }));
+  if (listing.fisherman === req.user.id) return res.status(403).json({ message: 'You cannot bid on your own listing' });
+  const requestId = typeof req.body.requestId === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(req.body.requestId) ? req.body.requestId : randomUUID();
+  const result = await submitAuctionOffer({ auction, amount, buyerId: req.user.id, mode: 'manual', requestId });
+  if (result.error) return res.status(400).json({ message: result.error });
+  res.status(201).json(result.response);
+});
+router.post('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), async (req, res) => {
+  const auction = await get('auctions', req.params.id);
+  if (!auction) return res.status(404).json({ message: 'Auction not found' });
+  const listing = await get('listings', auction.listing);
+  if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' });
+  if (listing.fisherman === req.user.id) return res.status(403).json({ message: 'You cannot bid on your own listing' });
+  const maxAmount = Number(req.body.maxAmount);
+  if (!Number.isFinite(maxAmount) || maxAmount <= 0) return res.status(400).json({ message: 'Enter a valid maximum bid amount' });
+  const requestId = typeof req.body.requestId === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(req.body.requestId) ? req.body.requestId : randomUUID();
+  const result = await submitAuctionOffer({ auction, amount: maxAmount, buyerId: req.user.id, mode: 'automatic', requestId });
+  if (result.error) return res.status(400).json({ message: result.error });
+  if (!result.response.duplicate) {
+    try {
+      await insert('notifications', {
+        user: req.user.id,
+        auction: auction.id,
+        type: 'automatic_bidding_activated',
+        title: 'Automatic bidding activated',
+        message: `Automatic bidding is active up to your private limit of ₹${maxAmount.toLocaleString()}/kg.`,
+        read: false
+      }, `automatic_${requestId}_${req.user.id}`);
+    } catch (error) {
+      console.error(`Automatic-bidding notification failed for ${req.user.id}:`, error);
+    }
+  }
+  res.status(201).json(result.response);
+});
+router.get('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), async (req, res) => {
+  const auction = await get('auctions', req.params.id);
+  if (!auction) return res.status(404).json({ message: 'Auction not found' });
+  const automaticBid = auction.autoBids?.[req.user.id];
+  res.json({ enabled: Boolean(automaticBid), maxAmount: automaticBid?.amount || null });
+});
+router.delete('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), async (req, res) => {
+  const initialAuction = await get('auctions', req.params.id);
+  if (!initialAuction) return res.status(404).json({ message: 'Auction not found' });
+  const legacyBids = where(await list('bids'), { auction: req.params.id });
+  const bidId = randomUUID();
+  let operation = null;
+  let closed = false;
+  const result = await transact('auctions', req.params.id, current => {
+    if (!current) return;
+    if (['completed', 'cancelled'].includes(current.status) || Date.parse(current.endTime) <= Date.now()) {
+      closed = true;
+      return;
+    }
+    const state = legacyAuctionState(current, legacyBids);
+    const autoBids = { ...(state.autoBids || {}) };
+    const bidderOffers = { ...(state.bidderOffers || {}) };
+    const existing = autoBids[req.user.id];
+    if (!existing) return state;
+    delete autoBids[req.user.id];
+    bidderOffers[req.user.id] = {
+      amount: Number(state.currentPrice || state.startPrice),
+      source: 'manual',
+      sequence: bidderOffers[req.user.id]?.sequence || Number(state.offerSequence || 0) + 1,
+      createdAt: bidderOffers[req.user.id]?.createdAt || existing.createdAt
+    };
+    operation = recalculateAuctionOffers({ ...state, autoBids, bidderOffers }, bidId);
+    return operation.auction;
+  });
+  if (closed) return res.status(409).json({ message: 'Automatic bidding cannot be changed after this auction closes' });
+  if (!result.value) return res.status(404).json({ message: 'Auction not found' });
+  const removedBid = operation?.bid;
+  if (removedBid) {
+    const risk = assessBidRisk(removedBid, [...legacyBids, removedBid], result.value);
+    try {
+      await insert('bids', { ...removedBid, riskReviewNeeded: risk.reviewNeeded, riskFlags: risk.flags }, removedBid.id);
+      await notifyBidParticipants({
+        auction: result.value,
+        bid: removedBid,
+        previousBidder: operation.previousBidder,
+        actorId: req.user.id,
+        legacyBids,
+        extended: false
+      });
+    } catch (error) {
+      console.error(`Automatic-bidding shutdown update failed for ${removedBid.id}:`, error);
+    }
+  }
+  res.json({ enabled: false, ...(removedBid ? { bid: removedBid } : {}) });
 });
 router.patch('/auctions/:id/close', requireAuth, allow('fisherman'), async (req, res) => {
   const auction = await get('auctions', req.params.id);
@@ -253,10 +542,13 @@ router.patch('/auctions/:id/close', requireAuth, allow('fisherman'), async (req,
   if (!auction || !listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Auction not found' });
   if (['completed', 'cancelled'].includes(auction.status)) return res.json(await refreshAuction(auction));
   const endTime = new Date().toISOString();
-  await update('auctions', auction.id, { endTime });
+  await transact('auctions', auction.id, current => {
+    if (!current || ['completed', 'cancelled'].includes(current.status)) return;
+    return { ...current, endTime };
+  });
   const completedAuction = await refreshAuction({ ...auction, endTime });
   const winner = completedAuction.winner ? await get('users', completedAuction.winner) : null;
-  res.json({ ...completedAuction, winnerName: winner?.name || null });
+  res.json({ ...publicAuction(completedAuction), winnerName: winner?.name || null });
 });
 router.get('/bid-monitoring', requireAuth, allow('fisherman', 'admin'), async (req, res) => {
   const [auctions, listings, bids, users] = await Promise.all(['auctions', 'listings', 'bids', 'users'].map(list));
@@ -340,8 +632,7 @@ router.post('/payments/razorpay/orders', requireAuth, allow('buyer'), async (req
     const auction = await get('auctions', req.body.auctionId);
     if (!auction) return res.status(404).json({ message: 'Auction not found' });
     const refreshed = await refreshAuction(auction);
-    const bids = sortAmount(where(await list('bids'), { auction: auction.id }));
-    if (refreshed.status !== 'completed' || !bids[0] || bids[0].buyer !== req.user.id) return res.status(403).json({ message: 'Only the winning buyer can checkout this completed bid' });
+    if (refreshed.status !== 'completed' || refreshed.winner !== req.user.id) return res.status(403).json({ message: 'Only the winning buyer can checkout this completed bid' });
     order = (await list('orders')).find(item => item.auction === auction.id);
     if (!order) return res.status(404).json({ message: 'Winning order not found' });
   } else if (req.body.listingId) {
@@ -427,6 +718,15 @@ router.post('/payments/razorpay/failure', requireAuth, allow('buyer'), async (re
     await failPayment(transaction, req.body.reason || 'Payment was cancelled');
   }
   res.json({ message: 'Payment attempt recorded' });
+});
+router.get('/notifications', requireAuth, async (req, res) => {
+  const notifications = where(await list('notifications'), { user: req.user.id });
+  res.json(sortNewest(notifications).slice(0, 40));
+});
+router.patch('/notifications/:id/read', requireAuth, async (req, res) => {
+  const notification = await get('notifications', req.params.id);
+  if (!notification || notification.user !== req.user.id) return res.status(404).json({ message: 'Notification not found' });
+  res.json(await update('notifications', notification.id, { read: true }));
 });
 router.get('/transactions', requireAuth, async (req, res) => {
   const transactions = sortNewest(await list('payments'));

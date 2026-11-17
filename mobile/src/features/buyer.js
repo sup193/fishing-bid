@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, SectionTitle, Stat, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
 
@@ -19,9 +19,17 @@ export function BuyerMarketScreen() {
   const [trendLoading, setTrendLoading] = useState(true);
   const [trendError, setTrendError] = useState('');
   const [selectedAuction, setSelectedAuction] = useState(null);
+  const [auctionDetail, setAuctionDetail] = useState(null);
   const [bidAmount, setBidAmount] = useState('');
+  const [automaticMax, setAutomaticMax] = useState('');
+  const [automaticEnabled, setAutomaticEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [automaticLoading, setAutomaticLoading] = useState(false);
+  const [auctionNow, setAuctionNow] = useState(0);
   const [message, setMessage] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [notificationError, setNotificationError] = useState('');
+  const selectedAuctionId = selectedAuction?.auction?.id;
 
   const load = useCallback(async () => {
     setError('');
@@ -41,6 +49,68 @@ export function BuyerMarketScreen() {
   }, []);
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const values = await mobileApi.notifications();
+        if (active) {
+          setNotifications(values);
+          setNotificationError('');
+        }
+      } catch (notificationLoadError) {
+        if (active) setNotificationError(notificationLoadError.message);
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const refreshAuctionDetail = useCallback(async () => {
+    if (!selectedAuctionId) return;
+    try {
+      const detail = await mobileApi.auction(selectedAuctionId);
+      setAuctionDetail(detail);
+      if (detail.auction.minimumBid) {
+        setBidAmount(current => !current || Number(current) < detail.auction.minimumBid
+          ? String(detail.auction.minimumBid)
+          : current);
+      }
+      setError('');
+    } catch (detailError) {
+      setError(detailError.message);
+    }
+  }, [selectedAuctionId]);
+
+  useEffect(() => {
+    if (!selectedAuctionId) return undefined;
+    Promise.resolve().then(refreshAuctionDetail);
+    const interval = setInterval(refreshAuctionDetail, 3000);
+    return () => clearInterval(interval);
+  }, [refreshAuctionDetail, selectedAuctionId]);
+
+  useEffect(() => {
+    if (!selectedAuctionId) return undefined;
+    let active = true;
+    mobileApi.automaticBiddingStatus(selectedAuctionId)
+      .then(result => {
+        if (!active) return;
+        setAutomaticEnabled(result.enabled);
+        setAutomaticMax(result.maxAmount ? String(result.maxAmount) : '');
+      })
+      .catch(statusError => { if (active) setError(statusError.message); });
+    return () => { active = false; };
+  }, [selectedAuctionId]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setAuctionNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadTrends = useCallback(async () => {
     setTrendLoading(true);
@@ -70,10 +140,21 @@ export function BuyerMarketScreen() {
     });
   }, [filter, listings, recommendations, search]);
 
+  const activeAuction = auctionDetail?.auction || selectedAuction?.auction;
+  const minimumBid = Number(activeAuction?.minimumBid || Number(activeAuction?.currentPrice || activeAuction?.startPrice || selectedAuction?.expectedPrice || 0)
+    + Number(activeAuction?.minimumIncrement || 10));
+  const auctionEnd = Date.parse(activeAuction?.endTime || '');
+  const auctionClosed = ['completed', 'cancelled'].includes(activeAuction?.status) || (Number.isFinite(auctionEnd) && auctionEnd <= auctionNow);
+  const remaining = auctionEnd - auctionNow;
+  const timerLabel = !Number.isFinite(auctionEnd) ? 'Timer unavailable'
+    : remaining <= 0 ? 'Closed'
+      : `${Math.floor(remaining / 60000)}m ${Math.floor((remaining % 60000) / 1000)}s`;
+
   async function submitBid() {
     const amount = Number(bidAmount);
-    const minimum = Number(selectedAuction?.auction?.currentPrice || selectedAuction?.auction?.startPrice || selectedAuction?.expectedPrice || 0)
-      + Number(selectedAuction?.auction?.minimumIncrement || 10);
+    const auction = auctionDetail?.auction || selectedAuction?.auction;
+    const minimum = Number(auction?.minimumBid || Number(auction?.currentPrice || auction?.startPrice || selectedAuction?.expectedPrice || 0)
+      + Number(auction?.minimumIncrement || 10));
     if (!Number.isFinite(amount) || amount < minimum) {
       setError(`Your bid must be at least ${money(minimum)} per kg.`);
       return;
@@ -82,14 +163,57 @@ export function BuyerMarketScreen() {
     setError('');
     try {
       await mobileApi.bid(selectedAuction.auction.id, amount);
-      setSelectedAuction(null);
-      setBidAmount('');
       setMessage(`Your ${money(amount)}/kg bid was submitted.`);
+      await refreshAuctionDetail();
       await load();
     } catch (bidError) {
       setError(bidError.message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function saveAutomaticBidding() {
+    const amount = Number(automaticMax);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Enter a valid maximum bid amount.');
+      return;
+    }
+    setAutomaticLoading(true);
+    setError('');
+    try {
+      await mobileApi.automaticBidding(selectedAuctionId, amount);
+      setAutomaticEnabled(true);
+      setMessage('Automatic bidding is active. Your maximum stays private.');
+      await refreshAuctionDetail();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setAutomaticLoading(false);
+    }
+  }
+
+  async function toggleAutomaticBidding(enabled) {
+    if (enabled) return saveAutomaticBidding();
+    setAutomaticLoading(true);
+    setError('');
+    try {
+      await mobileApi.disableAutomaticBidding(selectedAuctionId);
+      setAutomaticEnabled(false);
+      setMessage('Automatic bidding has been turned off.');
+    } catch (toggleError) {
+      setError(toggleError.message);
+    } finally {
+      setAutomaticLoading(false);
+    }
+  }
+
+  async function markNotificationRead(notification) {
+    try {
+      await mobileApi.markNotificationRead(notification.id);
+      setNotifications(current => current.map(item => item.id === notification.id ? { ...item, read: true } : item));
+    } catch (markError) {
+      setNotificationError(markError.message);
     }
   }
 
@@ -101,6 +225,19 @@ export function BuyerMarketScreen() {
         <Stat label="Available catches" value={listings.length} />
         <Stat label="Live auctions" value={listings.filter(item => item.saleMode === 'bid' && item.auction?.status === 'active').length} />
       </View>
+      {notificationError ? <Notice>{notificationError}</Notice> : null}
+      {notifications.length ? <Card>
+        <SectionTitle title="Auction notifications" detail={`${notifications.filter(item => !item.read).length} unread`} />
+        {notifications.slice(0, 4).map(notification => (
+          <View key={notification.id} style={styles.notificationRow}>
+            <View style={styles.notificationCopy}>
+              <Text style={styles.historyName}>{notification.title}</Text>
+              <Text style={styles.muted}>{notification.message}</Text>
+            </View>
+            {!notification.read ? <Button label="Read" variant="secondary" compact onPress={() => markNotificationRead(notification)} /> : null}
+          </View>
+        ))}
+      </Card> : null}
       <MarketTrendCard
         data={trends}
         days={trendDays}
@@ -116,7 +253,8 @@ export function BuyerMarketScreen() {
       </ScrollView>
       <SectionTitle title={filter === 'For you' ? 'Recommended for you' : 'Marketplace'} detail={`${filteredListings.length} catches`} />
       {loading ? <Loading label="Loading the marketplace…" /> : !filteredListings.length ? <Empty>No catches match this view yet. Pull down to refresh.</Empty> : filteredListings.map(item => {
-        const closed = item.saleMode === 'bid' && ['completed', 'cancelled'].includes(item.auction?.status);
+        const closed = item.saleMode === 'bid' && (['completed', 'cancelled'].includes(item.auction?.status)
+          || (item.auction?.endTime && Date.parse(item.auction.endTime) <= auctionNow));
         return (
           <ListingCard
             key={item.id}
@@ -125,8 +263,13 @@ export function BuyerMarketScreen() {
             actions={item.saleMode === 'bid'
               ? <Button label={closed ? 'Auction ended' : 'Place a bid'} disabled={closed} onPress={() => {
                 const next = Number(item.auction?.currentPrice || item.auction?.startPrice || item.expectedPrice || 0) + Number(item.auction?.minimumIncrement || 10);
+                setAuctionDetail(null);
+                setAutomaticEnabled(false);
+                setAutomaticMax('');
+                setError('');
                 setSelectedAuction(item);
                 setBidAmount(String(next));
+                setAuctionNow(Date.now());
               }} />
               : <Button label="Buy now" onPress={() => Alert.alert('Secure checkout', 'Payment checkout is not yet available in the mobile app. Open TideMarket on the web to complete a purchase.')} />}
           />
@@ -134,16 +277,50 @@ export function BuyerMarketScreen() {
       })}
       <Modal visible={Boolean(selectedAuction)} transparent animationType="slide" onRequestClose={() => setSelectedAuction(null)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Place your bid</Text>
-            <Text style={styles.modalSubtitle}>{selectedAuction?.fishType} · minimum {money(Number(selectedAuction?.auction?.currentPrice || selectedAuction?.auction?.startPrice || selectedAuction?.expectedPrice || 0) + Number(selectedAuction?.auction?.minimumIncrement || 10))}/kg</Text>
-            <Field label="Your bid per kg (₹)" value={bidAmount} onChangeText={setBidAmount} placeholder="Enter your bid" keyboardType="decimal-pad" autoCapitalize="none" />
-            {error ? <Notice>{error}</Notice> : null}
-            <View style={styles.modalActions}>
-              <Button label="Cancel" variant="secondary" onPress={() => { setSelectedAuction(null); setError(''); }} />
-              <Button label="Submit bid" onPress={submitBid} loading={submitting} />
+          <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{selectedAuction?.fishType} auction</Text>
+              <Text style={styles.modalSubtitle}>Fisherman: {selectedAuction?.fisherman?.name || 'Local fisherman'}</Text>
+              <View style={styles.auctionFacts}>
+                <Text style={styles.auctionFact}>Current bid: {money(activeAuction?.currentPrice || activeAuction?.startPrice)}/kg</Text>
+                <Text style={styles.auctionFact}>Minimum increment: {money(activeAuction?.minimumIncrement)}/kg</Text>
+                <Text style={styles.auctionFact}>Time remaining: {timerLabel}</Text>
+                <Text style={styles.auctionFact}>Active bidders: {auctionDetail?.activeBidderCount || 0}</Text>
+                <Text style={styles.auctionFact}>Status: {activeAuction?.status || 'loading'}</Text>
+                {activeAuction?.currentBidder?.name ? <Text style={styles.auctionFact}>Leading: {activeAuction.currentBidder.name}</Text> : null}
+              </View>
+              {remaining > 0 && remaining <= 300000 ? <Text style={styles.closingNotice}>A valid bid in the final 30 seconds extends the auction by 30 seconds.</Text> : null}
+              <Text style={styles.historyTitle}>Bid history · {auctionDetail?.bids?.length || 0}</Text>
+              {auctionDetail?.bids?.length
+                ? auctionDetail.bids.map(bid => (
+                  <View key={bid.id} style={styles.bidHistoryRow}>
+                    <View style={styles.bidHistoryCopy}>
+                      <Text style={styles.bidHistoryName}>{bid.buyer?.name || 'Buyer'}</Text>
+                      <Text style={styles.muted}>{formatDate(bid.createdAt)} · {bid.type === 'automatic' ? 'Automatic' : 'Manual'}</Text>
+                    </View>
+                    <Text style={styles.bidHistoryAmount}>{money(bid.amount)}/kg</Text>
+                  </View>
+                ))
+                : <Text style={styles.muted}>No bids yet.</Text>}
+              {!auctionClosed ? <>
+                <Field label={`Manual bid per kg (minimum ${money(minimumBid)})`} value={bidAmount} onChangeText={setBidAmount} placeholder="Enter your bid" keyboardType="decimal-pad" autoCapitalize="none" />
+                <Button label="Submit bid" onPress={submitBid} loading={submitting} />
+                <View style={styles.autoBidPanel}>
+                  <View style={styles.autoBidHeader}>
+                    <Text style={styles.historyTitle}>Automatic bidding</Text>
+                    <Switch value={automaticEnabled} onValueChange={toggleAutomaticBidding} disabled={automaticLoading} />
+                  </View>
+                  <Text style={styles.muted}>Bids increase only as needed and never exceed your private maximum.</Text>
+                  <Field label="Maximum bid per kg (₹)" value={automaticMax} onChangeText={setAutomaticMax} placeholder="Set your maximum" keyboardType="decimal-pad" autoCapitalize="none" />
+                  <Button label={automaticEnabled ? 'Update maximum' : 'Activate automatic bidding'} variant="secondary" onPress={saveAutomaticBidding} loading={automaticLoading} />
+                </View>
+              </> : <Text style={styles.muted}>{activeAuction?.winner ? 'Auction closed. The winner can continue to checkout on the web app.' : 'Auction closed without bids.'}</Text>}
+              {error ? <Notice>{error}</Notice> : null}
+              <View style={styles.modalActions}>
+                <Button label="Close" variant="secondary" onPress={() => { setSelectedAuction(null); setError(''); }} />
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </Page>
@@ -318,9 +495,22 @@ const styles = StyleSheet.create({
   bar: { width: 7, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   dateLabel: { color: colors.muted, fontSize: 8 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', padding: 14, backgroundColor: 'rgba(10,31,36,0.5)' },
-  modalCard: { padding: 20, borderRadius: 18, backgroundColor: colors.white, gap: 14 },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
+  modalCard: { maxHeight: '92%', padding: 20, borderRadius: 18, backgroundColor: colors.white, gap: 14 },
   modalTitle: { color: colors.ink, fontSize: 20, fontWeight: '800' },
   modalSubtitle: { color: colors.muted, fontSize: 12 },
+  auctionFacts: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  auctionFact: { padding: 8, borderRadius: 8, backgroundColor: '#eef7f3', color: colors.ink, fontSize: 10, fontWeight: '700' },
+  closingNotice: { padding: 10, borderRadius: 8, backgroundColor: '#fff8e9', color: '#85621a', fontSize: 10, lineHeight: 15 },
+  historyTitle: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  bidHistoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#edf2ef' },
+  bidHistoryCopy: { flex: 1, gap: 3 },
+  bidHistoryName: { color: colors.ink, fontSize: 11, fontWeight: '800' },
+  bidHistoryAmount: { color: colors.sea, fontSize: 11, fontWeight: '800' },
+  autoBidPanel: { gap: 9, padding: 12, borderWidth: 1, borderColor: '#dce9e5', borderRadius: 11, backgroundColor: '#f5faf7' },
+  autoBidHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  notificationRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderTopWidth: 1, borderTopColor: '#edf2ef' },
+  notificationCopy: { flex: 1, gap: 4 },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
   historyRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
   historyCopy: { flex: 1, gap: 4 },
