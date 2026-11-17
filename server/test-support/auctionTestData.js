@@ -22,9 +22,28 @@ export async function createAuctionDatabase(databasePath) {
       email: 'fisherman@auction.test',
       passwordHash,
       role: 'fisherman'
+    }],
+    ['fisherman-2', {
+      name: 'Other Test Fisherman',
+      email: 'other-fisherman@auction.test',
+      passwordHash,
+      role: 'fisherman'
     }]
   ]);
-  const listings = {};
+  const listings = {
+    'fixed-listing': {
+      fisherman: 'fisherman-1',
+      fishType: 'Prawns',
+      quantity: 30,
+      quality: 'Good',
+      size: 'Medium',
+      location: 'Udupi',
+      expectedPrice: 500,
+      salePrice: 500,
+      saleMode: 'sale',
+      status: 'available'
+    }
+  };
   const auctions = {};
 
   function addAuction(id, options = {}) {
@@ -65,6 +84,7 @@ export async function createAuctionDatabase(databasePath) {
   addAuction('auction-late', {
     auction: { endTime: new Date(now + 20_000).toISOString() }
   });
+  addAuction('auction-voice', { fishType: 'Tilapia' });
   addAuction('auction-web', { fishType: 'Mackerel' });
   addAuction('auction-mobile', { fishType: 'Sardine' });
   addAuction('auction-closed', {

@@ -25,6 +25,16 @@
       "expo-secure-store",
       "expo-router",
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "TideMarket uses your microphone to recognize voice marketplace commands.",
+          "speechRecognitionPermission": "TideMarket uses speech recognition for marketplace voice commands.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "TideMarket needs access to your photos so you can add catch images to listings."

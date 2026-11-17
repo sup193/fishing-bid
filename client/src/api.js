@@ -25,6 +25,7 @@ export const api = {
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   register: body => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   me: () => request('/auth/me'),
+  updatePreferredLanguage: preferredLanguage => request('/auth/preferences', { method: 'PATCH', body: JSON.stringify({ preferredLanguage }) }),
   orders: () => request('/orders'),
   transactions: () => request('/transactions'),
   buyerHistory: () => request('/buyer/history'),
@@ -54,6 +55,7 @@ export const api = {
   deleteListing: id => request(`/listings/${id}`, { method: 'DELETE' }),
   meta: () => request('/meta'),
   createListing: body => request('/listings', { method: 'POST', body: JSON.stringify(body) }),
+  updateListing: (id, body) => request(`/listings/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   createAuction: (id, body) => request(`/listings/${id}/auction`, { method: 'POST', body: JSON.stringify(body) }),
   closeAuction: id => request(`/auctions/${id}/close`, { method: 'PATCH' })
 };

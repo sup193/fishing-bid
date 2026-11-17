@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
+import VoiceAssistant from '../voice/VoiceAssistant.jsx';
+import { filterVoiceListings } from '../../../shared/voice/actions.js';
 
 const viewFromHash = () => {
   const hash = window.location.hash.slice(1);
@@ -228,7 +230,7 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
   </section>;
 }
 
-export default function UserApp({ user, onAuth }) {
+export default function UserApp({ user, onAuth, onUserUpdate }) {
   const wishlistStorageKey = `tide_wishlist_${user?.id || 'guest'}`;
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -266,6 +268,7 @@ export default function UserApp({ user, onAuth }) {
   const [recommendationSaleMode, setRecommendationSaleMode] = useState('all');
   const [recommendationWishlistOnly, setRecommendationWishlistOnly] = useState(false);
   const [listingError, setListingError] = useState('');
+  const [voiceSearch, setVoiceSearch] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -420,7 +423,8 @@ export default function UserApp({ user, onAuth }) {
   const priceHighlights = [...items].sort((a, b) => itemPrice(a) - itemPrice(b)).slice(0, 3);
   const visible = items.filter(item => {
     const category = categories.find(option => option.name === selectedCategory);
-    return selectedCategory === 'All' || category?.matches(item);
+    return (selectedCategory === 'All' || category?.matches(item))
+      && (!voiceSearch || filterVoiceListings([item], voiceSearch).length > 0);
   }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const guestPreviewItems = visible.slice(0, 3);
   const activeAuctions = items.filter(item => item.saleMode === 'bid' && item.auction?.status !== 'completed' && (!item.auction?.endTime || new Date(item.auction.endTime).getTime() > now)).length;
@@ -688,6 +692,15 @@ export default function UserApp({ user, onAuth }) {
       </section>}
       {user ? <section className="market buyer-market" id="market">
         {listingError && <p className="notice market-listing-error" role="status">Could not refresh marketplace listings: {listingError}. Showing the latest available listings.</p>}
+        {user.role === 'buyer' && <VoiceAssistant
+          user={user}
+          onUserUpdate={onUserUpdate}
+          onSearch={intent => {
+            setVoiceSearch(intent);
+            setSelectedCategory('All');
+            window.location.hash = '#market';
+          }}
+        />}
         <section className="market-pulse-section" aria-label="Live market pulse">
           <MarketTrendChart
             data={trendData}

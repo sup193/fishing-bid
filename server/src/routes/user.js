@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { SUPPORTED_LANGUAGES } from '../../../shared/voice/languages.js';
 import { get, insert, list, update, remove, reserveListing, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -50,7 +51,17 @@ const limitFishDetection = (req, res, next) => {
   for (const [ip, value] of detectionAttempts) if (value.resetAt <= now) detectionAttempts.delete(ip);
   next();
 };
-const publicUser = user => ({ id: user.id, name: user.name, email: user.email, role: user.role });
+const preferredLanguages = new Set(SUPPORTED_LANGUAGES.map(language => language.code));
+const validMoney = value => Number.isFinite(value) && value > 0
+  && Number.isSafeInteger(Math.round(value * 100))
+  && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
+const publicUser = user => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  preferredLanguage: preferredLanguages.has(user.preferredLanguage) ? user.preferredLanguage : 'en'
+});
 const fishermanFor = async id => sanitizeUser(await get('users', id));
 const listingView = async listing => {
   const auction = (await list('auctions')).find(item => item.listing === listing.id) || null;
@@ -328,6 +339,15 @@ async function markPaymentPaid(transaction, payment) {
 router.post('/auth/register', async (req, res) => { try { const { name, email, password, phone, location } = req.body; const normalizedEmail = email?.toLowerCase(); if (!name || !normalizedEmail || !password) return res.status(400).json({ message: 'Name, email and password are required' }); if ((await list('users')).some(user => user.email === normalizedEmail)) return res.status(400).json({ message: 'Email is already registered' }); const existingRequest = (await list('registrationRequests')).find(item => item.email === normalizedEmail && item.status === 'pending'); if (existingRequest) return res.status(409).json({ message: 'Your registration request is still pending admin approval.', status: 'pending' }); const request = { name, email: normalizedEmail, passwordHash: await bcrypt.hash(password, 12), role: 'buyer', status: 'pending' }; if (phone) request.phone = phone; if (location) request.location = location; await insert('registrationRequests', request); res.status(202).json({ status: 'pending', message: 'Registration submitted. An admin must approve your account before you can sign in.' }); } catch (error) { res.status(400).json({ message: error.message }); } });
 router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed', detail: error.message }); } });
 router.get('/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
+router.patch('/auth/preferences', requireAuth, async (req, res) => {
+  const { preferredLanguage } = req.body;
+  if (!preferredLanguages.has(preferredLanguage)) {
+    return res.status(400).json({ message: 'Choose a supported marketplace language' });
+  }
+  const user = await update('users', req.user.id, { preferredLanguage });
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  res.json({ user: publicUser(user) });
+});
 router.post('/uploads/image', requireAuth, allow('fisherman'), imageUpload, (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Upload a JPG, PNG, or WEBP fish image' });
   res.status(201).json({ imageUrl: `/uploads/${req.file.filename}` });
@@ -372,9 +392,98 @@ router.get('/market/trends', async (req, res) => {
 });
 router.get('/listings', async (req, res) => { let items = (await list('listings')).filter(item => ['available', 'auction'].includes(item.status)); if (req.query.quality) items = items.filter(item => item.quality === req.query.quality); if (req.query.fishType) items = items.filter(item => item.fishType === req.query.fishType); if (req.query.q) items = items.filter(item => `${item.fishType} ${item.location}`.toLowerCase().includes(req.query.q.toLowerCase())); res.json(await Promise.all(sortNewest(items).map(listingView))); });
 router.get('/listings/:id', async (req, res) => { const item = await get('listings', req.params.id); if (!item || item.status === 'removed') return res.status(404).json({ message: 'Listing not found' }); res.json(await listingView(item)); });
-router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => { const { fishType, quantity, quality, size, location, expectedPrice, description, imageUrl, saleMode = 'sale', salePrice } = req.body; const range = predictPrice(fishType, Number(quantity), quality, size); res.status(201).json(await insert('listings', { fisherman: req.user.id, fishType, quantity, quality, size, location, expectedPrice, salePrice: Number(salePrice || expectedPrice), saleMode, description, imageUrl, imageVerification: 'pending', predictedLow: range.low, predictedHigh: range.high, status: 'available' })); });
+router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
+  const fishType = typeof req.body.fishType === 'string' ? req.body.fishType.trim() : '';
+  const quantity = Number(req.body.quantity);
+  const quality = req.body.quality || 'Good';
+  const size = req.body.size || 'Medium';
+  const location = typeof req.body.location === 'string' ? req.body.location.trim() : '';
+  const expectedPrice = Number(req.body.expectedPrice);
+  const salePrice = Number(req.body.salePrice ?? req.body.expectedPrice);
+  const saleMode = req.body.saleMode || 'sale';
+  const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+  const imageUrl = typeof req.body.imageUrl === 'string' ? req.body.imageUrl : undefined;
+  const requestId = req.body.requestId;
+  if (!FISH_TYPES.includes(fishType) || !Number.isFinite(quantity) || quantity <= 0
+    || !QUALITIES.includes(quality) || !SIZES.includes(size) || !location
+    || location.length > 120 || !validMoney(expectedPrice) || !validMoney(salePrice)
+    || !['sale', 'bid'].includes(saleMode) || description.length > 1000) {
+    return res.status(400).json({ message: 'Provide a supported fish type, positive quantity and price, quality, size, and location' });
+  }
+  if (requestId !== undefined && (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(requestId))) {
+    return res.status(400).json({ message: 'Invalid listing request ID' });
+  }
+
+  const range = predictPrice(fishType, quantity, quality, size);
+  const fields = {
+    fisherman: req.user.id,
+    fishType,
+    quantity,
+    quality,
+    size,
+    location,
+    expectedPrice,
+    salePrice,
+    saleMode,
+    description,
+    ...(imageUrl ? { imageUrl } : {}),
+    imageVerification: 'pending',
+    predictedLow: range.low,
+    predictedHigh: range.high,
+    status: 'available'
+  };
+  let listing;
+  if (requestId) {
+    const id = `voice_${createHash('sha256').update(`${req.user.id}:${requestId}`).digest('hex')}`;
+    const now = new Date().toISOString();
+    const result = await transact('listings', id, current => current ? undefined : {
+      ...fields,
+      createdAt: now,
+      updatedAt: now
+    });
+    listing = result.value || await get('listings', id);
+    if (!result.committed) {
+      const sameRequest = listing?.fisherman === req.user.id
+        && ['fishType', 'quantity', 'quality', 'size', 'location', 'expectedPrice', 'salePrice', 'saleMode', 'description']
+          .every(key => listing[key] === fields[key])
+        && (listing.imageUrl || undefined) === fields.imageUrl;
+      if (!sameRequest) return res.status(409).json({ message: 'This listing request ID was already used' });
+      return res.status(200).json({ ...listing, duplicate: true });
+    }
+    listing = { id, ...listing };
+  } else {
+    listing = await insert('listings', fields);
+  }
+  res.status(201).json(listing);
+});
 router.get('/fisherman/listings', requireAuth, allow('fisherman'), async (req, res) => res.json(await Promise.all(sortNewest(where(await list('listings'), { fisherman: req.user.id })).map(listingView))));
 router.get('/fisherman/sales', requireAuth, allow('fisherman'), async (req, res) => { const orders = sortNewest(where(await list('orders'), { fisherman: req.user.id })); const listings = await list('listings'); res.json(orders.map(order => ({ ...order, listingDetails: listings.find(listing => listing.id === order.listing) || null }))); });
+router.patch('/listings/:id', requireAuth, allow('fisherman'), async (req, res) => {
+  const listing = await get('listings', req.params.id);
+  if (!listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Listing not found' });
+  const hasPrice = Object.hasOwn(req.body, 'price');
+  const hasQuantity = Object.hasOwn(req.body, 'quantity');
+  if (!hasPrice && !hasQuantity || Object.keys(req.body).some(key => !['price', 'quantity'].includes(key))) {
+    return res.status(400).json({ message: 'Update only the listing price or quantity' });
+  }
+  if (listing.status !== 'available' || listing.saleMode === 'bid'
+    || (await list('auctions')).some(auction => auction.listing === listing.id)) {
+    return res.status(409).json({ message: 'Only available fixed-price listings can be changed' });
+  }
+  const changes = {};
+  if (hasPrice) {
+    const price = Number(req.body.price);
+    if (!validMoney(price)) return res.status(400).json({ message: 'Price must be a positive amount with at most two decimal places' });
+    changes.expectedPrice = price;
+    changes.salePrice = price;
+  }
+  if (hasQuantity) {
+    const quantity = Number(req.body.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ message: 'Quantity must be greater than zero' });
+    changes.quantity = quantity;
+  }
+  res.json(await update('listings', listing.id, changes));
+});
 router.delete('/listings/:id', requireAuth, allow('fisherman'), async (req, res) => { const listing = await get('listings', req.params.id); if (!listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Listing not found' }); const linkedOrder = (await list('orders')).find(order => order.listing === listing.id); if (linkedOrder || ['sold', 'auction'].includes(listing.status)) return res.status(409).json({ message: 'This listing cannot be deleted because it has an active bid or sale record.' }); const auction = (await list('auctions')).find(item => item.listing === listing.id); if (auction) await remove('auctions', auction.id); await remove('listings', listing.id); res.json({ message: 'Listing deleted' }); });
 router.post('/listings/:id/auction', requireAuth, allow('fisherman'), async (req, res) => {
   const listing = await get('listings', req.params.id);

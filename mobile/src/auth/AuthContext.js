@@ -87,6 +87,9 @@ export function AuthProvider({ children }) {
     setToken(null);
     setUser(null);
   }, []);
+  const updateUser = useCallback(nextUser => {
+    setUser(current => current ? { ...current, ...nextUser } : nextUser);
+  }, []);
 
   const value = useMemo(() => ({
     user,
@@ -95,8 +98,9 @@ export function AuthProvider({ children }) {
     error,
     signIn,
     signOut,
+    updateUser,
     retrySession: () => setRetry(value => value + 1)
-  }), [user, token, checking, error, signIn, signOut]);
+  }), [user, token, checking, error, signIn, signOut, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
