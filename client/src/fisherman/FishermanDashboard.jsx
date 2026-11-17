@@ -5,16 +5,19 @@ import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import VoiceAssistant from '../voice/VoiceAssistant.jsx';
+import ReputationPanel from '../ReputationPanel.jsx';
+import { PricePredictionSummary } from '../PricePredictionTool.jsx';
 
-const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
+const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
 export default function FishermanDashboard({ user, onUserUpdate, initialView = 'inventory', onViewChange }) {
-  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false);
+  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null);
   useEffect(() => setView(initialView), [initialView]);
   const loadListings = () => api.fishermanListings().then(setListings).catch(err => setError(err.message));
   const loadSales = () => api.fishermanSales().then(setSales).catch(err => setError(err.message));
   useEffect(() => {
     api.meta().then(setMeta).catch(err => setError(err.message));
+    api.fishermanReputation().then(setReputation).catch(err => setError(err.message));
     loadListings();
     loadSales();
     const refresh = setInterval(() => { loadListings(); loadSales(); }, 30_000);
@@ -74,6 +77,8 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
   const submit = async event => { event.preventDefault(); setError(''); try { const expectedPrice = mode === 'bid' ? Number(form.expectedPrice) : Number(form.salePrice); const listing = await api.createListing({ ...form, saleMode: mode, expectedPrice, salePrice: Number(form.salePrice || expectedPrice), quantity: Number(form.quantity) }); if (mode === 'bid') await api.createAuction(listing.id, { startPrice: expectedPrice, minimumIncrement: Number(form.minimumIncrement), startTime: new Date().toISOString(), endTime: new Date(form.endTime).toISOString() }); setMessage(mode === 'bid' ? 'Bidding listing created.' : 'Sale listing created.'); setForm(emptyForm); setMode(null); setView('inventory'); loadListings(); } catch (err) { setError(err.message); } };
   const closeBid = async id => { try { const result = await api.closeAuction(id); setMessage(result.winnerName ? `Bidding stopped. ${result.winnerName} won at ₹${Number(result.winningBid).toLocaleString()}/kg. Checkout is ready.` : 'Bidding stopped with no bids.'); loadListings(); loadSales(); } catch (err) { setError(err.message); } };
   const deleteListing = async id => { if (!window.confirm('Delete this fish listing?')) return; try { await api.deleteListing(id); setMessage('Listing deleted.'); loadListings(); } catch (err) { setError(err.message); } };
+  const progressOrder = async (order, status) => { setError(''); try { await api.updateOrderStatus(order.id, status); setMessage(`Order marked ${status}.`); loadSales(); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); } catch (err) { setError(err.message); } };
+  const scheduleDelivery = async (order, date) => { const expectedDeliveryAt = Date.parse(`${date}T23:59:59`); if (!Number.isFinite(expectedDeliveryAt)) { setError('Choose an expected delivery date.'); return; } setError(''); try { await api.setDeliverySchedule(order.id, new Date(expectedDeliveryAt).toISOString()); setMessage('Expected delivery date saved.'); loadSales(); } catch (err) { setError(err.message); } };
   const startPost = () => { setForm(emptyForm); setMode(null); setView('inventory'); };
   return <main className="dashboard fisherman-view">
     <section className="fisherman-hero">
@@ -98,12 +103,14 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
       <button className={view === 'inventory' ? 'active' : ''} onClick={() => { setView('inventory'); onViewChange?.('inventory'); }}><Fish size={17} /> Inventory <b>{listings.length}</b></button>
       <button className={view === 'orders' ? 'active' : ''} onClick={() => { setView('orders'); onViewChange?.('orders'); loadSales(); }}><ClipboardList size={17} /> Buyer orders <b>{sales.length}</b></button>
       <button className={view === 'sales' ? 'active' : ''} onClick={() => { setView('sales'); onViewChange?.('sales'); loadSales(); }}><ShoppingBag size={17} /> Selling data <b>{sales.filter(order => order.paymentStatus === 'paid' || ['processing', 'completed', 'delivered'].includes(order.orderStatus)).length}</b></button>
+      <button className={view === 'reputation' ? 'active' : ''} onClick={() => { setView('reputation'); onViewChange?.('reputation'); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); }}><CheckCircle2 size={17} /> Reputation</button>
       <button className={view === 'bids' ? 'active' : ''} onClick={() => { setView('bids'); onViewChange?.('bids'); }}><Gavel size={17} /> Bid history</button>
       <button className={view === 'transactions' ? 'active' : ''} onClick={() => { setView('transactions'); onViewChange?.('transactions'); }}><ClipboardList size={17} /> Transactions</button>
     </nav>
     {view === 'transactions' && <TransactionHistory title="Fisherman transaction history" />}
+    {view === 'reputation' && <ReputationPanel reputation={reputation} />}
     {view === 'bids' && <BidMonitoring title="Auction bid history & review" />}
-    {view === 'orders' && <OrdersPage orders={sales} />}
+    {view === 'orders' && <OrdersPage orders={sales} onStatus={progressOrder} onSchedule={scheduleDelivery} />}
     {view === 'sales' && <SalesPage orders={sales} />}
     {view === 'inventory' && <>
       <section className="fisherman-inventory-tools">
@@ -131,8 +138,43 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
 }
 
 function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSubmit, onBack }) {
+  const [prediction, setPrediction] = useState(null);
+  const [predictionError, setPredictionError] = useState('');
   const sampleImage = sampleImageForFishType(form.fishType);
   const usingSampleImage = Boolean(sampleImage && form.imageUrl === sampleImage);
+  useEffect(() => {
+    if (!form.fishType || !form.quantity || Number(form.quantity) <= 0) {
+      setPrediction(null);
+      return undefined;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api.previewPricePrediction({
+        fishType: form.fishType,
+        quantity: Number(form.quantity),
+        quality: form.quality,
+        size: form.size,
+        freshness: form.freshness,
+        location: form.location
+      }).then(value => {
+        if (active) {
+          setPrediction(value);
+          setPredictionError('');
+        }
+      }).catch(error => {
+        if (active) {
+          setPrediction(null);
+          setPredictionError(error.message);
+        }
+      });
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
+  const selectedPrice = Number(mode === 'bid' ? form.expectedPrice : form.salePrice);
+  const predictionLow = Number(prediction?.minimumPerKg);
+  const predictionHigh = Number(prediction?.maximumPerKg);
+  const priceOutOfRange = selectedPrice > 0 && predictionLow > 0
+    && (selectedPrice < predictionLow * 0.8 || selectedPrice > predictionHigh * 1.2);
   return <section className={`panel listing-page listing-page-${mode}`}>
     <button className="back-button" type="button" onClick={onBack}>← Back to selling options</button>
     <div className="listing-form-heading">
@@ -159,10 +201,14 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
           <label className="listing-field"><span>Fish species</span><select name="fishType" value={form.fishType} onChange={onChange} required><option value="">Select species</option>{meta.fishTypes.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
           <label className="listing-field"><span>Seller-reported quality grade</span><select name="quality" value={form.quality} onChange={onChange}>{meta.qualities.map(value => <option key={value}>{value}</option>)}</select><small className="listing-grade-hint">Not AI-detected or independently inspected for freshness.</small></label>
           <label className="listing-field"><span>Catch size</span><select name="size" value={form.size} onChange={onChange}>{meta.sizes.map(value => <option key={value}>{value}</option>)}</select></label>
+          <label className="listing-field"><span>Reported freshness</span><select name="freshness" value={form.freshness} onChange={onChange}><option value="same_day">Same-day</option><option value="fresh">Fresh</option><option value="chilled">Chilled</option><option value="frozen">Frozen</option></select></label>
           <label className="listing-field"><span>Quantity (kg)</span><input name="quantity" type="number" min="1" placeholder="e.g. 25" value={form.quantity} onChange={onChange} required /></label>
           <label className="listing-field"><span>Landing port</span><input name="location" placeholder="e.g. Mangalore" value={form.location} onChange={onChange} required /></label>
           <label className="listing-field"><span>{mode === 'bid' ? 'Starting bid / kg' : 'Sale price / kg'}</span>{mode === 'bid' ? <input name="expectedPrice" type="number" min="1" placeholder="₹ Starting bid" value={form.expectedPrice} onChange={onChange} required /> : <input name="salePrice" type="number" min="1" placeholder="₹ Price per kg" value={form.salePrice} onChange={onChange} required />}</label>
         </div>
+        {predictionError && <p className="notice" role="status">Price estimate unavailable: {predictionError}</p>}
+        {prediction && <PricePredictionSummary prediction={prediction} compact />}
+        {priceOutOfRange && <p className="price-warning" role="status">Your selected price is more than 20% outside this indicative range. This is only a warning; your chosen price will not be changed.</p>}
         {mode === 'bid' && <fieldset className="listing-auction-settings">
           <legend>Auction settings</legend>
           <div className="form-grid">
@@ -192,7 +238,7 @@ function CatchRow({ item, onClose, onDelete }) {
       {item.saleMode === 'bid' && auction
         ? <div className="live-price">Initial ₹{auction.startPrice} · Current ₹{auction.currentPrice || auction.startPrice} · <b>+{auction.priceIncreasePercent || 0}%</b>{auction.status === 'completed' && auction.winner ? ' · Winner selected' : auction.status === 'completed' ? ' · Closed with no bids' : ''}</div>
         : <div className="live-price">Fixed sale ₹{item.salePrice || item.expectedPrice}/kg</div>}
-      {hasPriceGuide && <div className="live-price">Rule-based price guide ₹{low.toLocaleString()}–₹{high.toLocaleString()}/kg · not a guaranteed sale price</div>}
+      {hasPriceGuide && <div className="live-price">Indicative estimate ₹{low.toLocaleString()}–₹{high.toLocaleString()}/kg · {item.pricePrediction?.reliability || 'preliminary'}</div>}
       <div className="verification">{item.imageVerification === 'verified' ? <><CheckCircle2 size={14} /> Image status marked complete</> : item.imageUrl ? <><ImagePlus size={14} /> Photo uploaded · species not AI-checked</> : <><ImagePlus size={14} /> Photo needed</>}</div>
     </div>
     <div className="catch-side">
@@ -202,6 +248,6 @@ function CatchRow({ item, onClose, onDelete }) {
     </div>
   </article>;
 }
-function OrdersPage({ orders }) { return <section className="panel fisherman-data"><div className="panel-title"><h2>Orders from buyers</h2><span>{orders.length} orders</span></div>{orders.map(order => <OrderRow key={order.id} order={order} />)}{!orders.length && <p className="empty">No buyer orders yet.</p>}</section>; }
+function OrdersPage({ orders, onStatus, onSchedule }) { const [dates, setDates] = useState({}); return <section className="panel fisherman-data"><div className="panel-title"><h2>Orders from buyers</h2><span>{orders.length} orders</span></div>{orders.map(order => { const next = order.orderStatus === 'processing' ? 'delivered' : order.orderStatus === 'delivered' ? 'completed' : null; const verified = order.paymentStatus === 'paid' && order.gateway === 'razorpay' && Boolean(order.transactionRef); return <div key={order.id} className="fisherman-order-management"><OrderRow order={order} />{verified && !['completed', 'cancelled'].includes(order.orderStatus) && <div className="delivery-schedule-controls"><label>Expected delivery date<input type="date" value={dates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? ''} onChange={event => setDates(current => ({ ...current, [order.id]: event.target.value }))} /></label><button className="button small secondary" onClick={() => onSchedule(order, dates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? '')}>Save date</button></div>}{verified && next && <button className="button small primary" onClick={() => onStatus(order, next)}>Mark {next}</button>}</div>; })}{!orders.length && <p className="empty">No buyer orders yet.</p>}</section>; }
 function SalesPage({ orders }) { const completed = orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay'); const total = completed.reduce((sum, order) => sum + Number(order.amount || 0), 0); return <section className="panel fisherman-data"><div className="panel-title"><h2>Selling data</h2><span>Total ₹{total.toLocaleString()}</span></div>{completed.map(order => <OrderRow key={order.id} order={order} sale />)}{!completed.length && <p className="empty">Verified Razorpay payments will appear here after buyer checkout.</p>}</section>; }
 function OrderRow({ order, sale = false }) { const listing = order.listingDetails; const image = sampleImageFor(listing); return <article className="order-row">{image ? <img src={image} alt={listing.imageUrl ? listing.fishType : `${listing.fishType} sample image`} /> : <div className="catch-placeholder"><Fish size={22} /></div>}<div><strong>{listing?.fishType || 'Fish order'}</strong><small>Order {order.orderNumber || order.id}</small><small>{order.quantity || listing?.quantity || 0} kg · Buyer order · {new Date(order.createdAt).toLocaleDateString()}</small></div><div className="order-amount"><strong>₹{Number(order.amount || 0).toLocaleString()}</strong><small className={sale ? 'status-paid' : ''}>{order.orderStatus || 'pending'}</small></div></article>; }

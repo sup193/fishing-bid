@@ -12,6 +12,8 @@ import { get, insert, list, update, remove, reserveListing, transact, where, sor
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { allow, requireAuth, signUser } from '../auth.js';
 import { FISH_TYPES, QUALITIES, SIZES, assessBidRisk, predictPrice, refreshAuction } from '../utils.js';
+import { getFishermanReputation, getPublicReputationSummaries, isVerifiedPaidOrder, refreshFishermanReputation } from '../reputation.js';
+import { makePricePrediction, normalizePredictionInput } from '../pricePrediction.js';
 import { applyAuctionOffer, auctionBidderIds, minimumBidFor, publicAuction, recalculateAuctionOffers } from '../auctionBidding.js';
 import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
 
@@ -63,7 +65,7 @@ const publicUser = user => ({
   preferredLanguage: preferredLanguages.has(user.preferredLanguage) ? user.preferredLanguage : 'en'
 });
 const fishermanFor = async id => sanitizeUser(await get('users', id));
-const listingView = async listing => {
+const listingView = async (listing, reputation = undefined) => {
   const auction = (await list('auctions')).find(item => item.listing === listing.id) || null;
   const bids = auction ? sortAmount(where(await list('bids'), { auction: auction.id })) : [];
   const currentPrice = Number(auction?.currentPrice || bids[0]?.amount || auction?.startPrice || listing.salePrice || listing.expectedPrice);
@@ -71,11 +73,18 @@ const listingView = async listing => {
   const storedLow = Number(listing.predictedLow);
   const storedHigh = Number(listing.predictedHigh);
   const hasStoredGuide = Number.isFinite(storedLow) && storedLow > 0 && Number.isFinite(storedHigh) && storedHigh >= storedLow;
+  const fisherman = await fishermanFor(listing.fisherman);
   return {
     ...listing,
     predictedLow: hasStoredGuide ? storedLow : guide.low,
     predictedHigh: hasStoredGuide ? storedHigh : guide.high,
-    fisherman: await fishermanFor(listing.fisherman),
+    pricePrediction: listing.pricePrediction || {
+      reliability: 'preliminary',
+      model: { name: 'Transparent rule baseline', status: 'preliminary' },
+      disclaimer: 'An estimate for guidance only, not a guaranteed sale price or live market quote.'
+    },
+    fisherman: fisherman ? { ...fisherman, ...(reputation ? { reputation } : {}) } : null,
+    ...(reputation ? { reputation } : {}),
     auction: auction ? {
       ...publicAuction(auction),
       bidCount: Number(auction.bidCount || bids.length),
@@ -333,6 +342,7 @@ async function markPaymentPaid(transaction, payment) {
     paidAt
   });
   if (order.listing) await update('listings', order.listing, { status: 'sold', reservedBy: null });
+  if (order.fisherman) await refreshFishermanReputation(order.fisherman);
   return paidTransaction;
 }
 
@@ -347,6 +357,17 @@ router.patch('/auth/preferences', requireAuth, async (req, res) => {
   const user = await update('users', req.user.id, { preferredLanguage });
   if (!user) return res.status(404).json({ message: 'User not found' });
   res.json({ user: publicUser(user) });
+});
+router.get('/fisherman/reputation', requireAuth, allow('fisherman'), async (req, res) => {
+  const reputation = await getFishermanReputation(req.user.id);
+  if (!reputation) return res.status(404).json({ message: 'Fisherman profile not found' });
+  res.json(reputation);
+});
+router.get('/fishermen/:id/reputation', async (req, res) => {
+  const summaries = await getPublicReputationSummaries([req.params.id]);
+  const reputation = summaries.get(req.params.id);
+  if (!reputation) return res.status(404).json({ message: 'Fisherman profile not found' });
+  res.json(reputation);
 });
 router.post('/uploads/image', requireAuth, allow('fisherman'), imageUpload, (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Upload a JPG, PNG, or WEBP fish image' });
@@ -390,14 +411,54 @@ router.get('/market/trends', async (req, res) => {
   const points = buildMarketTrendPoints({ listings, auctions, bids, orders, startTime });
   res.json({ days: requestedDays, generatedAt: new Date().toISOString(), points });
 });
-router.get('/listings', async (req, res) => { let items = (await list('listings')).filter(item => ['available', 'auction'].includes(item.status)); if (req.query.quality) items = items.filter(item => item.quality === req.query.quality); if (req.query.fishType) items = items.filter(item => item.fishType === req.query.fishType); if (req.query.q) items = items.filter(item => `${item.fishType} ${item.location}`.toLowerCase().includes(req.query.q.toLowerCase())); res.json(await Promise.all(sortNewest(items).map(listingView))); });
-router.get('/listings/:id', async (req, res) => { const item = await get('listings', req.params.id); if (!item || item.status === 'removed') return res.status(404).json({ message: 'Listing not found' }); res.json(await listingView(item)); });
+router.post('/price-predictions/preview', requireAuth, allow('buyer', 'fisherman'), async (req, res) => {
+  try {
+    normalizePredictionInput(req.body);
+    res.json(await makePricePrediction(req.body, { userId: req.user.id, role: req.user.role, save: false }));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
+});
+router.post('/price-predictions', requireAuth, allow('buyer', 'fisherman'), async (req, res) => {
+  try {
+    normalizePredictionInput(req.body);
+    res.status(201).json(await makePricePrediction(req.body, { userId: req.user.id, role: req.user.role }));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
+});
+router.get('/price-predictions', requireAuth, allow('buyer', 'fisherman'), async (req, res) => {
+  const predictions = (await list('pricePredictions'))
+    .filter(item => item.requestedBy === req.user.id)
+    .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))
+    .slice(0, 100)
+    .map(({ requestedBy, ...item }) => item);
+  res.json(predictions);
+});
+router.get('/listings', async (req, res) => {
+  let items = (await list('listings')).filter(item => ['available', 'auction'].includes(item.status));
+  if (req.query.quality) items = items.filter(item => item.quality === req.query.quality);
+  if (req.query.fishType) items = items.filter(item => item.fishType === req.query.fishType);
+  if (req.query.q) items = items.filter(item => `${item.fishType} ${item.location}`.toLowerCase().includes(req.query.q.toLowerCase()));
+  items = sortNewest(items);
+  const reputations = await getPublicReputationSummaries(items.map(item => item.fisherman));
+  res.json(await Promise.all(items.map(item => listingView(item, reputations.get(item.fisherman)))));
+});
+router.get('/listings/:id', async (req, res) => {
+  const item = await get('listings', req.params.id);
+  if (!item || item.status === 'removed') return res.status(404).json({ message: 'Listing not found' });
+  const reputations = await getPublicReputationSummaries([item.fisherman]);
+  res.json(await listingView(item, reputations.get(item.fisherman)));
+});
 router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
   const fishType = typeof req.body.fishType === 'string' ? req.body.fishType.trim() : '';
   const quantity = Number(req.body.quantity);
   const quality = req.body.quality || 'Good';
   const size = req.body.size || 'Medium';
   const location = typeof req.body.location === 'string' ? req.body.location.trim() : '';
+  const freshness = req.body.freshness || 'fresh';
   const expectedPrice = Number(req.body.expectedPrice);
   const salePrice = Number(req.body.salePrice ?? req.body.expectedPrice);
   const saleMode = req.body.saleMode || 'sale';
@@ -414,7 +475,15 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
     return res.status(400).json({ message: 'Invalid listing request ID' });
   }
 
-  const range = predictPrice(fishType, quantity, quality, size);
+  let pricePrediction;
+  try {
+    pricePrediction = await makePricePrediction({
+      fishType, quantity, quality, size, location, freshness
+    }, { userId: req.user.id, role: req.user.role, save: false });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
   const fields = {
     fisherman: req.user.id,
     fishType,
@@ -422,14 +491,27 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
     quality,
     size,
     location,
+    freshness,
     expectedPrice,
     salePrice,
     saleMode,
     description,
     ...(imageUrl ? { imageUrl } : {}),
     imageVerification: 'pending',
-    predictedLow: range.low,
-    predictedHigh: range.high,
+    predictedLow: pricePrediction.minimumPerKg,
+    predictedHigh: pricePrediction.maximumPerKg,
+    pricePrediction: {
+      estimatePerKg: pricePrediction.estimatePerKg,
+      minimumPerKg: pricePrediction.minimumPerKg,
+      maximumPerKg: pricePrediction.maximumPerKg,
+      estimatedTotal: pricePrediction.estimatedTotal,
+      reliability: pricePrediction.reliability,
+      model: pricePrediction.model,
+      trend: pricePrediction.trend,
+      factors: pricePrediction.factors,
+      asOf: pricePrediction.asOf,
+      disclaimer: pricePrediction.disclaimer
+    },
     status: 'available'
   };
   let listing;
@@ -444,7 +526,7 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
     listing = result.value || await get('listings', id);
     if (!result.committed) {
       const sameRequest = listing?.fisherman === req.user.id
-        && ['fishType', 'quantity', 'quality', 'size', 'location', 'expectedPrice', 'salePrice', 'saleMode', 'description']
+        && ['fishType', 'quantity', 'quality', 'size', 'location', 'freshness', 'expectedPrice', 'salePrice', 'saleMode', 'description']
           .every(key => listing[key] === fields[key])
         && (listing.imageUrl || undefined) === fields.imageUrl;
       if (!sameRequest) return res.status(409).json({ message: 'This listing request ID was already used' });
@@ -456,15 +538,20 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
   }
   res.status(201).json(listing);
 });
-router.get('/fisherman/listings', requireAuth, allow('fisherman'), async (req, res) => res.json(await Promise.all(sortNewest(where(await list('listings'), { fisherman: req.user.id })).map(listingView))));
+router.get('/fisherman/listings', requireAuth, allow('fisherman'), async (req, res) => {
+  const listings = sortNewest(where(await list('listings'), { fisherman: req.user.id }));
+  const reputations = await getPublicReputationSummaries([req.user.id]);
+  res.json(await Promise.all(listings.map(item => listingView(item, reputations.get(req.user.id)))));
+});
 router.get('/fisherman/sales', requireAuth, allow('fisherman'), async (req, res) => { const orders = sortNewest(where(await list('orders'), { fisherman: req.user.id })); const listings = await list('listings'); res.json(orders.map(order => ({ ...order, listingDetails: listings.find(listing => listing.id === order.listing) || null }))); });
 router.patch('/listings/:id', requireAuth, allow('fisherman'), async (req, res) => {
   const listing = await get('listings', req.params.id);
   if (!listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Listing not found' });
   const hasPrice = Object.hasOwn(req.body, 'price');
   const hasQuantity = Object.hasOwn(req.body, 'quantity');
-  if (!hasPrice && !hasQuantity || Object.keys(req.body).some(key => !['price', 'quantity'].includes(key))) {
-    return res.status(400).json({ message: 'Update only the listing price or quantity' });
+  const hasFreshness = Object.hasOwn(req.body, 'freshness');
+  if (!hasPrice && !hasQuantity && !hasFreshness || Object.keys(req.body).some(key => !['price', 'quantity', 'freshness'].includes(key))) {
+    return res.status(400).json({ message: 'Update only the listing price, quantity, or reported freshness' });
   }
   if (listing.status !== 'available' || listing.saleMode === 'bid'
     || (await list('auctions')).some(auction => auction.listing === listing.id)) {
@@ -481,6 +568,40 @@ router.patch('/listings/:id', requireAuth, allow('fisherman'), async (req, res) 
     const quantity = Number(req.body.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ message: 'Quantity must be greater than zero' });
     changes.quantity = quantity;
+  }
+  if (hasFreshness) {
+    if (typeof req.body.freshness !== 'string') return res.status(400).json({ message: 'Choose a supported freshness level' });
+    try {
+      normalizePredictionInput({ ...listing, ...changes, freshness: req.body.freshness });
+    } catch (error) {
+      if (error.status === 400) return res.status(400).json({ message: error.message });
+      throw error;
+    }
+    changes.freshness = req.body.freshness;
+  }
+  if (hasQuantity || hasFreshness) {
+    const prediction = await makePricePrediction({
+      ...listing,
+      ...changes,
+      fishType: listing.fishType,
+      location: listing.location,
+      quantity: changes.quantity ?? listing.quantity,
+      freshness: changes.freshness ?? listing.freshness ?? 'fresh'
+    }, { userId: req.user.id, role: req.user.role, save: false });
+    changes.predictedLow = prediction.minimumPerKg;
+    changes.predictedHigh = prediction.maximumPerKg;
+    changes.pricePrediction = {
+      estimatePerKg: prediction.estimatePerKg,
+      minimumPerKg: prediction.minimumPerKg,
+      maximumPerKg: prediction.maximumPerKg,
+      estimatedTotal: prediction.estimatedTotal,
+      reliability: prediction.reliability,
+      model: prediction.model,
+      trend: prediction.trend,
+      factors: prediction.factors,
+      asOf: prediction.asOf,
+      disclaimer: prediction.disclaimer
+    };
   }
   res.json(await update('listings', listing.id, changes));
 });
@@ -540,13 +661,14 @@ router.get('/auctions/:id', async (req, res) => {
     .map(bid => ({ ...bid, buyer: bidders.get(bid.buyer) }))
     .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0));
   const leader = auction.currentBidder ? bidders.get(auction.currentBidder) || await get('users', auction.currentBidder) : null;
+  const reputations = await getPublicReputationSummaries([listing.fisherman]);
   res.json({
     auction: {
       ...publicAuction(auction),
       currentBidder: leader ? { id: leader.id, name: leader.name } : null,
       minimumBid: minimumBidFor(auction)
     },
-    listing: await listingView(listing),
+    listing: await listingView(listing, reputations.get(listing.fisherman)),
     bids,
     activeBidderCount: auctionBidderIds(auction, legacyBids).length
   });
@@ -854,16 +976,22 @@ router.get('/transactions', requireAuth, async (req, res) => {
   })));
 });
 router.get('/buyer/history', requireAuth, allow('buyer'), async (req, res) => {
-  const [bids, auctions, listings, orders, payments] = await Promise.all([
+  const [bids, auctions, listings, orders, payments, users, reviews, disputes] = await Promise.all([
     list('bids'),
     list('auctions'),
     list('listings'),
     list('orders'),
-    list('payments')
+    list('payments'),
+    list('users'),
+    list('reviews'),
+    list('disputes')
   ]);
   const buyerBids = bids.filter(bid => bid.buyer === req.user.id);
   const buyerOrders = sortNewest(orders.filter(order => order.buyer === req.user.id));
   const buyerPayments = sortNewest(payments.filter(payment => payment.buyer === req.user.id));
+  const buyerReviewOrders = new Set(reviews.filter(review => review.buyer === req.user.id).map(review => review.order));
+  const buyerDisputeOrders = new Set(disputes.filter(dispute => dispute.buyer === req.user.id).map(dispute => dispute.order));
+  const usersById = new Map(users.map(item => [item.id, item]));
   const bidHistory = buyerBids.map(bid => {
     const auction = auctions.find(item => item.id === bid.auction);
     const listing = auction && listings.find(item => item.id === auction.listing);
@@ -890,17 +1018,22 @@ router.get('/buyer/history', requireAuth, allow('buyer'), async (req, res) => {
   const orderHistory = buyerOrders.map(order => {
     const listing = listings.find(item => item.id === order.listing);
     const transactions = buyerPayments.filter(payment => payment.order === order.id);
-    const verifiedPaid = order.paymentStatus === 'paid' && order.gateway === 'razorpay';
+    const verifiedPaid = isVerifiedPaidOrder(order, listing);
     return {
       id: order.id,
       orderNumber: order.orderNumber || order.id,
       fishType: listing?.fishType || 'Fish order',
+      fisherman: usersById.get(order.fisherman)?.name || 'Fisherman',
+      fishermanId: order.fisherman,
       quantity: Number(order.quantity || listing?.quantity || 0),
       amount: Number(order.amount || 0),
       createdAt: order.createdAt,
       orderStatus: order.orderStatus || 'pending',
       paymentStatus: verifiedPaid ? 'paid' : order.paymentStatus === 'paid' ? 'unverified-demo' : order.paymentStatus || 'pending',
       paymentMethod: order.paymentMethod || null,
+      canReview: verifiedPaid && order.orderStatus === 'completed' && !buyerReviewOrders.has(order.id),
+      reviewSubmitted: buyerReviewOrders.has(order.id),
+      canReport: verifiedPaid && !buyerDisputeOrders.has(order.id),
       demo: Boolean(order.demo),
       transactionIds: transactions.map(payment => payment.id)
     };
@@ -917,7 +1050,108 @@ router.get('/buyer/history', requireAuth, allow('buyer'), async (req, res) => {
   }));
   res.json({ bids: sortNewest(bidHistory), orders: orderHistory, payments: paymentHistory });
 });
-router.patch('/orders/:id/status', requireAuth, allow('fisherman', 'admin'), async (req, res) => { const order = await get('orders', req.params.id); if (!order || (req.user.role === 'fisherman' && order.fisherman !== req.user.id)) return res.status(404).json({ message: 'Order not found' }); res.json(await update('orders', order.id, { orderStatus: req.body.status })); });
-router.get('/recommendations', requireAuth, allow('buyer'), async (req, res) => { const bids = where(await list('bids'), { buyer: req.user.id }); const auctionList = await list('auctions'); const listingIds = auctionList.filter(auction => bids.some(bid => bid.auction === auction.id)).map(auction => auction.listing); const items = await list('listings'); res.json(await Promise.all(sortNewest(items.filter(item => !listingIds.length || listingIds.includes(item.id))).slice(0, 12).map(listingView))); });
+router.get('/buyer/reviews', requireAuth, allow('buyer'), async (req, res) => {
+  res.json(sortNewest(where(await list('reviews'), { buyer: req.user.id })));
+});
+router.post('/orders/:id/reviews', requireAuth, allow('buyer'), async (req, res) => {
+  const order = await get('orders', req.params.id);
+  if (!order || order.buyer !== req.user.id) return res.status(404).json({ message: 'Order not found' });
+  const listing = await get('listings', order.listing);
+  if (!isVerifiedPaidOrder(order, listing) || order.orderStatus !== 'completed') {
+    return res.status(409).json({ message: 'Reviews are available only for verified paid orders marked completed' });
+  }
+  const rating = Number(req.body.rating);
+  const comment = typeof req.body.comment === 'string' ? req.body.comment.trim() : '';
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length > 1000) {
+    return res.status(400).json({ message: 'Choose a 1–5 star rating and keep feedback under 1,000 characters' });
+  }
+  const review = {
+    order: order.id,
+    fisherman: order.fisherman,
+    buyer: req.user.id,
+    listing: listing.id,
+    rating,
+    comment,
+    status: 'pending',
+    moderatedBy: null,
+    moderatedAt: null
+  };
+  const result = await transact('reviews', `order_${order.id}`, current => current ? undefined : review);
+  if (!result.committed) return res.status(409).json({ message: 'A review has already been submitted for this order' });
+  await refreshFishermanReputation(order.fisherman);
+  res.status(201).json({ id: `order_${order.id}`, ...review });
+});
+router.post('/orders/:id/disputes', requireAuth, allow('buyer'), async (req, res) => {
+  const order = await get('orders', req.params.id);
+  if (!order || order.buyer !== req.user.id) return res.status(404).json({ message: 'Order not found' });
+  const listing = await get('listings', order.listing);
+  if (!isVerifiedPaidOrder(order, listing)) return res.status(409).json({ message: 'A complaint requires a verified paid order' });
+  const complaint = typeof req.body.complaint === 'string' ? req.body.complaint.trim() : '';
+  if (complaint.length < 10 || complaint.length > 2000) {
+    return res.status(400).json({ message: 'Describe the issue in 10–2,000 characters' });
+  }
+  const dispute = {
+    order: order.id,
+    fisherman: order.fisherman,
+    buyer: req.user.id,
+    listing: listing.id,
+    complaint,
+    status: 'open',
+    finding: 'unreviewed',
+    adminNote: ''
+  };
+  const result = await transact('disputes', `order_${order.id}`, current => current ? undefined : dispute);
+  if (!result.committed) return res.status(409).json({ message: 'A complaint has already been submitted for this order' });
+  res.status(201).json({ id: `order_${order.id}`, ...dispute });
+});
+router.patch('/orders/:id/delivery-schedule', requireAuth, allow('fisherman'), async (req, res) => {
+  const order = await get('orders', req.params.id);
+  if (!order || order.fisherman !== req.user.id) return res.status(404).json({ message: 'Order not found' });
+  const listing = await get('listings', order.listing);
+  if (!isVerifiedPaidOrder(order, listing) || ['completed', 'cancelled'].includes(order.orderStatus)) {
+    return res.status(409).json({ message: 'A delivery date can be set only for an active, verified paid order' });
+  }
+  const expectedAt = Date.parse(req.body.expectedDeliveryAt || '');
+  if (!Number.isFinite(expectedAt) || expectedAt < Date.now() || expectedAt > Date.now() + 90 * 86400000) {
+    return res.status(400).json({ message: 'Choose an expected delivery date within the next 90 days' });
+  }
+  res.json(await update('orders', order.id, { expectedDeliveryAt: new Date(expectedAt).toISOString() }));
+});
+router.patch('/orders/:id/status', requireAuth, allow('fisherman', 'admin'), async (req, res) => {
+  const order = await get('orders', req.params.id);
+  if (!order || (req.user.role === 'fisherman' && order.fisherman !== req.user.id)) return res.status(404).json({ message: 'Order not found' });
+  if (typeof req.body.status !== 'string' || !req.body.status) return res.status(400).json({ message: 'Choose an order status' });
+  const changes = { orderStatus: req.body.status };
+  if (req.user.role === 'fisherman') {
+    if (!['delivered', 'completed', 'cancelled'].includes(req.body.status)) {
+      return res.status(400).json({ message: 'Fishermen may mark verified orders delivered, completed, or cancelled' });
+    }
+    const listing = await get('listings', order.listing);
+    if (!isVerifiedPaidOrder(order, listing)) return res.status(409).json({ message: 'Only verified paid orders can be progressed' });
+    if (req.body.status === 'delivered' && order.orderStatus !== 'processing') {
+      return res.status(409).json({ message: 'Only processing orders can be marked delivered' });
+    }
+    if (req.body.status === 'completed' && order.orderStatus !== 'delivered') {
+      return res.status(409).json({ message: 'Mark the order delivered before completing it' });
+    }
+    if (req.body.status === 'cancelled' && ['completed', 'delivered'].includes(order.orderStatus)) {
+      return res.status(409).json({ message: 'Delivered or completed orders cannot be cancelled' });
+    }
+    if (req.body.status === 'delivered') changes.deliveredAt = new Date().toISOString();
+    if (req.body.status === 'completed') changes.completedAt = new Date().toISOString();
+    if (req.body.status === 'cancelled') changes.cancellationActor = 'fisherman';
+  }
+  const updatedOrder = await update('orders', order.id, changes);
+  if (order.fisherman) await refreshFishermanReputation(order.fisherman);
+  res.json(updatedOrder);
+});
+router.get('/recommendations', requireAuth, allow('buyer'), async (req, res) => {
+  const bids = where(await list('bids'), { buyer: req.user.id });
+  const auctionList = await list('auctions');
+  const listingIds = auctionList.filter(auction => bids.some(bid => bid.auction === auction.id)).map(auction => auction.listing);
+  const items = sortNewest((await list('listings')).filter(item => !listingIds.length || listingIds.includes(item.id))).slice(0, 12);
+  const reputations = await getPublicReputationSummaries(items.map(item => item.fisherman));
+  res.json(await Promise.all(items.map(item => listingView(item, reputations.get(item.fisherman)))));
+});
 router.get('/meta', (req, res) => res.json({ fishTypes: FISH_TYPES, qualities: QUALITIES, sizes: SIZES }));
 export default router;

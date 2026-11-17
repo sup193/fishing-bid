@@ -162,7 +162,16 @@ export function ListingCard({ item, actions, detail }) {
       </View>
       <Text style={styles.listingMeta}>{item.quantity || 0} kg · {item.location || 'Port unavailable'} · {item.quality || 'Grade not set'}</Text>
       {item.fisherman?.name ? <Text style={styles.listingMeta}>By {item.fisherman.name}</Text> : null}
+      {item.fisherman?.reputation ? <View style={styles.listingTrust}>
+        <Text style={styles.listingTrustLevel}>{item.fisherman.reputation.verified ? '✓ ' : ''}{item.fisherman.reputation.level}</Text>
+        <Text style={styles.listingMeta}>{item.fisherman.reputation.status === 'rated'
+          ? `${item.fisherman.reputation.score}/100 trust · ${item.fisherman.reputation.averageRating?.toFixed(1) || '—'}★ · ${item.fisherman.reputation.completedOrderCount} completed`
+          : 'No verified order history yet'}</Text>
+      </View> : null}
       <Text style={styles.listingPrice}>₹{Number(price || 0).toLocaleString()}<Text style={styles.listingUnit}> / kg</Text></Text>
+      {Number(item.predictedLow) > 0 && Number(item.predictedHigh) >= Number(item.predictedLow)
+        ? <Text style={styles.listingMeta}>Indicative price estimate ₹{Number(item.predictedLow).toLocaleString()}–₹{Number(item.predictedHigh).toLocaleString()}/kg · not guaranteed</Text>
+        : null}
       {item.saleMode === 'bid' && item.auction ? (
         <Text style={styles.listingMeta}>{item.auction.bidCount || 0} bids · {item.auction.status || 'scheduled'}{item.auction.endTime ? ` · Ends ${new Date(item.auction.endTime).toLocaleString()}` : ''}</Text>
       ) : null}
@@ -245,6 +254,8 @@ const styles = StyleSheet.create({
   listingName: { flex: 1, color: colors.ink, fontSize: 17, fontWeight: '800' },
   badge: { overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: colors.pale, color: colors.sea, fontSize: 9, fontWeight: '800' },
   listingMeta: { color: colors.muted, fontSize: 12, lineHeight: 17 },
+  listingTrust: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
+  listingTrustLevel: { color: colors.sea, fontSize: 10, fontWeight: '800' },
   listingPrice: { color: colors.coral, fontSize: 19, fontWeight: '800' },
   listingUnit: { color: colors.muted, fontSize: 11, fontWeight: '600' },
   listingPhoto: { width: '100%', height: 170, borderRadius: 10, backgroundColor: colors.pale },

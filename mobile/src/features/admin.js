@@ -258,11 +258,119 @@ export function AdminPeopleScreen() {
   );
 }
 
+export function AdminTrustScreen() {
+  const [scores, setScores] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [disputes, setDisputes] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [working, setWorking] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const [reputation, customerReviews, complaints, priceData] = await Promise.all([
+        mobileApi.adminReputation(), mobileApi.adminReviews(), mobileApi.adminDisputes(), mobileApi.adminPriceAnalytics()
+      ]);
+      setScores(reputation);
+      setReviews(customerReviews);
+      setDisputes(complaints);
+      setAnalytics(priceData);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { Promise.resolve().then(load); }, [load]);
+
+  async function act(key, action, successMessage) {
+    setWorking(key);
+    setError('');
+    setMessage('');
+    try {
+      await action();
+      setMessage(successMessage);
+      await load();
+    } catch (actionError) {
+      setError(actionError.message);
+    } finally {
+      setWorking('');
+    }
+  }
+
+  async function evaluateModel() {
+    await act('model', async () => {
+      const result = await mobileApi.evaluatePriceModel();
+      if (result.status === 'insufficient_data') throw new Error(`Not enough verified sales: ${result.sampleCount}/${result.requiredSampleCount}.`);
+    }, 'Price model evaluation completed and analytics refreshed.');
+  }
+
+  return (
+    <Page title="Trust & price analytics" subtitle="Moderate verified feedback, resolve order complaints, and monitor price model evidence." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
+      {error ? <Notice>{error}</Notice> : null}
+      {message ? <Notice type="success">{message}</Notice> : null}
+      {loading ? <Loading label="Loading reputation and price data…" /> : null}
+      <SectionTitle title="Fisherman trust scores" detail={`${scores.length} accounts`} />
+      {scores.map(({ fisherman, reputation }) => <Card key={fisherman.id}>
+        <Text style={styles.personName}>{fisherman.name} · {reputation.status === 'rated' ? reputation.score : '—'}/100</Text>
+        <Text style={styles.detail}>{reputation.level} · {reputation.completedOrderCount} completed · {reputation.averageRating === null ? 'No approved ratings' : `${reputation.averageRating.toFixed(1)} stars`}</Text>
+        {reputation.factors?.map(factor => <Text style={styles.detail} key={factor.key}>{factor.key}: {factor.score === null ? 'no data' : `${Math.round(factor.score)}/100`} ({factor.weight}%)</Text>)}
+        <Button label={reputation.verified ? 'Remove verification' : 'Verify fisherman'} variant="secondary" compact disabled={Boolean(working)} onPress={() => act(`verify-${fisherman.id}`, () => mobileApi.setFishermanVerification(fisherman.id, !reputation.verified), `${fisherman.name} verification updated.`)} />
+      </Card>)}
+
+      <SectionTitle title="Buyer review moderation" detail={`${reviews.filter(review => review.status === 'pending').length} pending`} />
+      {!reviews.length && !loading ? <Empty>No buyer reviews submitted.</Empty> : reviews.map(review => (
+        <Card key={review.id}>
+          <Text style={styles.personName}>{review.rating}/5 stars · {review.status}</Text>
+          <Text style={styles.detail}>Verified order {review.order} · fisherman {review.fisherman}</Text>
+          {review.comment ? <Text style={styles.detail}>{review.comment}</Text> : null}
+          {review.status === 'pending' ? <View style={styles.requestActions}>
+            <Button label="Approve" compact disabled={Boolean(working)} onPress={() => act(review.id, () => mobileApi.moderateReview(review.id, { status: 'approved' }), 'Review approved.')} />
+            <Button label="Reject" variant="danger" compact disabled={Boolean(working)} onPress={() => act(review.id, () => mobileApi.moderateReview(review.id, { status: 'rejected' }), 'Review rejected.')} />
+          </View> : null}
+        </Card>
+      ))}
+
+      <SectionTitle title="Order complaints" detail={`${disputes.filter(item => item.status !== 'reviewed').length} open`} />
+      {!disputes.length && !loading ? <Empty>No buyer complaints reported.</Empty> : disputes.map(dispute => (
+        <Card key={dispute.id}>
+          <Text style={styles.personName}>Order {dispute.order} · {dispute.status}</Text>
+          <Text style={styles.detail}>Fisherman {dispute.fisherman} · buyer identity withheld</Text>
+          <Text style={styles.detail}>{dispute.complaint}</Text>
+          {dispute.status !== 'reviewed' ? <View style={styles.requestActions}>
+            <Button label="Confirm" compact disabled={Boolean(working)} onPress={() => act(dispute.id, () => mobileApi.reviewDispute(dispute.id, { finding: 'confirmed' }), 'Complaint confirmed; score recalculated.')} />
+            <Button label="Not confirmed" variant="secondary" compact disabled={Boolean(working)} onPress={() => act(dispute.id, () => mobileApi.reviewDispute(dispute.id, { finding: 'not_confirmed' }), 'Complaint reviewed without a confirmed finding.')} />
+          </View> : null}
+        </Card>
+      ))}
+
+      <SectionTitle title="Price model health" detail={`${analytics?.dataAvailability?.verifiedSaleCount || 0}/${analytics?.dataAvailability?.requiredSampleCount || 50} verified sales`} />
+      <Card>
+        <Text style={styles.personName}>{analytics?.model?.model === 'linear_regression' ? 'Linear regression' : 'Transparent rule baseline'} · {analytics?.model?.status || 'preliminary'}</Text>
+        <Text style={styles.detail}>Prediction requests: {analytics?.predictionUsageCount || 0}</Text>
+        {analytics?.model?.validation ? <Text style={styles.detail}>Holdout MAE ₹{analytics.model.validation.metrics?.mae}/kg · RMSE ₹{analytics.model.validation.metrics?.rmse}/kg</Text> : null}
+        <Button label={working === 'model' ? 'Evaluating…' : 'Evaluate verified sales'} compact disabled={Boolean(working) || !analytics?.dataAvailability?.canEvaluateModel} onPress={evaluateModel} />
+      </Card>
+      <SectionTitle title="Species-wise verified prices" />
+      {analytics?.species?.length ? analytics.species.map(item => <Card key={item.fishType}>
+        <Text style={styles.personName}>{item.fishType} · {item.observations} sales</Text>
+        <Text style={styles.detail}>Average ₹{item.averagePricePerKg}/kg · range ₹{item.minimumPricePerKg}–₹{item.maximumPricePerKg}/kg</Text>
+      </Card>) : <Empty>No verified paid sales are available for market statistics.</Empty>}
+    </Page>
+  );
+}
+
 const styles = StyleSheet.create({
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   sectionHeading: { color: colors.ink, fontSize: 16, fontWeight: '800' },
   peopleActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   personName: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   detail: { color: colors.muted, fontSize: 11 },
-  requestActions: { flexDirection: 'row', gap: 9, marginTop: 2 }
+  requestActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 }
 });

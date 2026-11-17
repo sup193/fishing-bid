@@ -5,6 +5,8 @@ import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, S
 import { mobileApi } from '../../api';
 import { useAuth } from '../auth/AuthContext';
 import VoiceAssistantPanel from '../components/VoiceAssistant';
+import { ReputationSummary } from '../components/Reputation';
+import { PricePredictionSummary } from '../components/PricePrediction';
 
 const blankListing = {
   fishType: '',
@@ -30,6 +32,8 @@ export function FishermanInventoryScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [priceEstimate, setPriceEstimate] = useState(null);
+  const [priceEstimateError, setPriceEstimateError] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -46,6 +50,34 @@ export function FishermanInventoryScreen() {
   }, []);
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
+  useEffect(() => {
+    if (!showForm || !form.fishType || !form.quantity || Number(form.quantity) <= 0) {
+      setPriceEstimate(null);
+      return undefined;
+    }
+    let active = true;
+    const timer = setTimeout(() => {
+      mobileApi.previewPricePrediction({
+        fishType: form.fishType.trim(),
+        quantity: Number(form.quantity),
+        quality: form.quality,
+        size: form.size,
+        freshness: form.freshness || 'fresh',
+        location: form.location
+      }).then(value => {
+        if (active) {
+          setPriceEstimate(value);
+          setPriceEstimateError('');
+        }
+      }).catch(previewError => {
+        if (active) {
+          setPriceEstimate(null);
+          setPriceEstimateError(previewError.message);
+        }
+      });
+    }, 350);
+    return () => { active = false; clearTimeout(timer); };
+  }, [showForm, form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
 
   const activeAuctions = listings.filter(item => item.saleMode === 'bid' && ['active', 'scheduled'].includes(item.auction?.status)).length;
   const activeListings = listings.filter(item => ['available', 'auction'].includes(item.status)).length;
@@ -115,6 +147,7 @@ export function FishermanInventoryScreen() {
         quantity,
         quality: form.quality.trim() || 'Not set',
         size: form.size.trim() || 'Not set',
+        freshness: form.freshness || 'fresh',
         location: form.location.trim(),
         expectedPrice: price,
         salePrice: price,
@@ -191,6 +224,7 @@ export function FishermanInventoryScreen() {
   return (
     <Page title="Your catch, your terms." subtitle="Post sale listings, start auctions, and manage your inventory." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
+      {priceEstimateError && showForm ? <Notice>Price estimate unavailable: {priceEstimateError}</Notice> : null}
       {message ? <Notice type="success">{message}</Notice> : null}
       {user ? <VoiceAssistantPanel user={user} onUserUpdate={updateUser} onActionComplete={load} /> : null}
       <View style={styles.stats}>
@@ -226,6 +260,15 @@ export function FishermanInventoryScreen() {
             <Button label={imageUploading ? 'Uploading photo…' : selectedPhoto ? 'Choose another photo' : 'Choose catch photo'} onPress={choosePhoto} loading={imageUploading} variant="secondary" />
             <Field label="Seller-reported quality" value={form.quality} onChangeText={value => updateField('quality', value)} placeholder="e.g. Premium" />
             <Field label="Size" value={form.size} onChangeText={value => updateField('size', value)} placeholder="e.g. Medium" />
+            <Text style={styles.orderMeta}>Seller-reported freshness</Text>
+            <View style={styles.chips}>
+              {['same_day', 'fresh', 'chilled', 'frozen'].map(value => <Chip key={value} label={value.replace('_', ' ')} selected={(form.freshness || 'fresh') === value} onPress={() => updateField('freshness', value)} />)}
+            </View>
+            {priceEstimate ? <PricePredictionSummary prediction={priceEstimate} compact /> : null}
+            {priceEstimate && Number(form.price) > 0
+              && (Number(form.price) < priceEstimate.minimumPerKg * 0.8 || Number(form.price) > priceEstimate.maximumPerKg * 1.2)
+              ? <Notice>Your chosen price is more than 20% outside this indicative range. This warning will not change your price.</Notice>
+              : null}
             {saleMode === 'bid' ? <>
               <Field label="Minimum bid increase (₹)" value={form.minimumIncrement} onChangeText={value => updateField('minimumIncrement', value)} keyboardType="decimal-pad" autoCapitalize="none" />
               <Field label="Auction duration (hours)" value={form.durationHours} onChangeText={value => updateField('durationHours', value)} keyboardType="decimal-pad" autoCapitalize="none" />
@@ -249,6 +292,7 @@ export function FishermanOrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [updating, setUpdating] = useState('');
+  const [deliveryDates, setDeliveryDates] = useState({});
 
   const load = useCallback(async () => {
     setError('');
@@ -277,6 +321,25 @@ export function FishermanOrdersScreen() {
     }
   }
 
+  async function saveDeliveryDate(order) {
+    const date = deliveryDates[order.id] || order.expectedDeliveryAt?.slice(0, 10) || '';
+    const expectedDeliveryAt = Date.parse(`${date}T23:59:59`);
+    if (!Number.isFinite(expectedDeliveryAt)) {
+      setError('Enter an expected delivery date in YYYY-MM-DD format.');
+      return;
+    }
+    setUpdating(order.id);
+    setError('');
+    try {
+      await mobileApi.setDeliverySchedule(order.id, new Date(expectedDeliveryAt).toISOString());
+      await load();
+    } catch (scheduleError) {
+      setError(scheduleError.message);
+    } finally {
+      setUpdating('');
+    }
+  }
+
   return (
     <Page title="Buyer orders" subtitle="Track payments and progress for orders on your catches." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
@@ -288,6 +351,12 @@ export function FishermanOrdersScreen() {
             <Text style={styles.orderTitle}>{order.listingDetails?.fishType || 'Fish order'} · {money(order.amount)}</Text>
             <Text style={styles.orderMeta}>Order {order.orderNumber || order.id} · {order.quantity || order.listingDetails?.quantity || 0} kg</Text>
             <Text style={styles.orderMeta}>Payment {order.paymentStatus || 'pending'} · Order {order.orderStatus || 'pending'}</Text>
+            {order.paymentStatus === 'paid' && order.gateway === 'razorpay' && order.transactionRef && !['completed', 'cancelled'].includes(order.orderStatus)
+              ? <>
+                <Field label="Expected delivery (YYYY-MM-DD)" value={deliveryDates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? ''} onChangeText={value => setDeliveryDates(current => ({ ...current, [order.id]: value }))} placeholder="e.g. 2026-07-14" autoCapitalize="none" />
+                <Button label="Save expected delivery" variant="secondary" compact onPress={() => saveDeliveryDate(order)} loading={updating === order.id} />
+              </>
+              : null}
             {canProgress ? <Button label={`Mark ${nextStatus}`} compact onPress={() => setOrderStatus(order, nextStatus)} loading={updating === order.id} /> : null}
           </Card>
         );
@@ -344,3 +413,29 @@ const styles = StyleSheet.create({
   orderTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   orderMeta: { color: colors.muted, fontSize: 11 }
 });
+
+export function FishermanReputationScreen() {
+  const [reputation, setReputation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      setReputation(await mobileApi.fishermanReputation());
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+  useEffect(() => { Promise.resolve().then(load); }, [load]);
+  return (
+    <Page title="Your reputation" subtitle="A transparent score from verified paid orders, approved reviews, and recorded delivery evidence." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
+      {error ? <Notice>{error}</Notice> : null}
+      {loading ? <Loading label="Loading verified reputation…" /> : null}
+      {reputation ? <ReputationSummary reputation={reputation} /> : null}
+    </Page>
+  );
+}

@@ -6,10 +6,11 @@ import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
 import VoiceAssistant from '../voice/VoiceAssistant.jsx';
 import { filterVoiceListings } from '../../../shared/voice/actions.js';
+import PricePredictionTool from '../PricePredictionTool.jsx';
 
 const viewFromHash = () => {
   const hash = window.location.hash.slice(1);
-  return ['history', 'transactions'].includes(hash) ? hash : 'market';
+  return ['history', 'transactions', 'prices'].includes(hash) ? hash : 'market';
 };
 
 const fallback = [
@@ -121,7 +122,15 @@ function FishCard({ item, onSelect, onBid, isWishlisted, onToggleWishlist, now }
         <span><Gavel size={14} /> {Number(item.auction?.bidCount || 0) ? 'Highest bid' : 'Starting bid'} · ₹{price.toLocaleString()}/kg</span>
       </div>}
       <div className="market-product-price"><span>{auction ? Number(item.auction?.bidCount || 0) ? 'Current highest bid' : 'Starting bid' : 'Price per kg'}</span><strong>₹{price.toLocaleString()}<small>/kg</small></strong></div>
-      {guide && <p className="market-price-guide"><span>Rule-based guide</span><strong>{guide}</strong></p>}
+      {item.reputation && <div className="market-trust-badge">
+        <span className={`reputation-badge reputation-${item.reputation.status === 'rated' ? item.reputation.level?.toLowerCase().replace(/\s+/g, '-') : 'unrated'}`}>
+          {item.reputation.verified ? '✓ ' : ''}{item.reputation.level}
+        </span>
+        <small>{item.reputation.status === 'rated'
+          ? `${item.reputation.score}/100 trust · ${item.reputation.averageRating?.toFixed(1) || '—'}★ · ${item.reputation.completedOrderCount} completed`
+          : 'No verified order history yet'}</small>
+      </div>}
+      {guide && <p className="market-price-guide"><span>Indicative estimate</span><strong>{guide}</strong></p>}
       <div className="market-product-actions">
         <button className="market-details-button" onClick={() => onSelect(item)}>View details</button>
         <button className="market-buy-button" disabled={auction && closed} onClick={() => auction ? onBid(item) : onSelect(item)}>{auction ? closed ? 'Auction ended' : 'Place bid' : 'Buy now'}</button>
@@ -660,6 +669,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       </section>
       <nav className="buyer-dashboard-nav" aria-label="Buyer dashboard">
         <a className={currentView === 'market' ? 'active' : ''} href="#market"><Search size={17} /> Marketplace</a>
+        <a className={currentView === 'prices' ? 'active' : ''} href="#prices"><BarChart3 size={17} /> Price estimate</a>
         <a className={currentView === 'history' ? 'active' : ''} href="#history"><History size={17} /> Bids &amp; orders</a>
         <a className={currentView === 'transactions' ? 'active' : ''} href="#transactions"><ReceiptText size={17} /> Transactions</a>
       </nav>
@@ -836,6 +846,10 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       <div className="buyer-page-heading"><div><p className="kicker">PAYMENT ACTIVITY</p><h2>Transactions</h2><p>View payment attempts and verified payment status.</p></div><CircleDollarSign size={23} /></div>
       <TransactionHistory key={transactionRefresh} title="Payment transactions" />
     </main>}
+    {buyerView && currentView === 'prices' && <main className="buyer-view" id="prices">
+      <div className="buyer-page-heading"><div><p className="kicker">MARKET GUIDANCE</p><h2>Fish price estimate</h2><p>Compare a transparent estimate and verified sale history when available.</p></div><BarChart3 size={23} /></div>
+      <PricePredictionTool />
+    </main>}
     {showBiddingGuide && <div className="modal-backdrop bidding-guide-backdrop" onClick={() => setShowBiddingGuide(false)}>
       <section className="modal bidding-guide-modal" role="dialog" aria-modal="true" aria-labelledby="market-bidding-title" onClick={event => event.stopPropagation()}>
         <button className="close" aria-label="Close bidding guide" onClick={() => setShowBiddingGuide(false)}>×</button>
@@ -860,7 +874,13 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
         <p>{selected.quantity} kg from {selected.location}. {selected.description || 'Listing details supplied by the fisherman.'}</p>
         {selected.saleMode === 'bid' && <p className="auction-seller">Fisherman: <strong>{selected.fisherman?.name || 'Local fisherman'}</strong></p>}
         <p className="quality-safety-note">The quality grade is seller-provided. Any AI image result identifies species only and does not estimate freshness or replace food-safety inspection.</p>
-        {priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative rule-based price guide: {priceGuide(selected)}.</strong> This is a simple estimate based on listing details, not an ML prediction, live market quote, or guaranteed price.</p>}
+        {selected.fisherman?.reputation && <section className="listing-trust-detail" aria-label="Fisherman reputation">
+          <div><strong>{selected.fisherman.name || 'Fisherman'}</strong><span className={`reputation-badge reputation-${selected.fisherman.reputation.status === 'rated' ? selected.fisherman.reputation.level?.toLowerCase().replace(/\s+/g, '-') : 'unrated'}`}>{selected.fisherman.reputation.verified ? '✓ Verified · ' : ''}{selected.fisherman.reputation.level}</span></div>
+          <p>{selected.fisherman.reputation.status === 'rated'
+            ? `${selected.fisherman.reputation.score}/100 trust · ${selected.fisherman.reputation.averageRating?.toFixed(1) || '—'} average rating · ${selected.fisherman.reputation.completedOrderCount} verified completed orders`
+            : 'No verified completed orders yet; this is not a negative rating.'}</p>
+        </section>}
+        {priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative price estimate: {priceGuide(selected)}.</strong> This is guidance only, not a guaranteed sale price or live market quote.</p>}
         {selected.saleMode === 'bid' && <>
           <div className="auction-live-summary">
             <article><span>Current highest bid</span><strong>₹{Number(selected.auction?.currentPrice || selected.auction?.startPrice || selected.expectedPrice).toLocaleString()}<small>/kg</small></strong></article>

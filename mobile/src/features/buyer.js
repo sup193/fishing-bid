@@ -425,13 +425,16 @@ function MarketTrendCard({ data, days, fishType, loading, error, onDaysChange, o
 
 export function BuyerHistoryScreen() {
   const [history, setHistory] = useState(null);
+  const [reviews, setReviews] = useState([]);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
     try {
-      setHistory(await mobileApi.buyerHistory());
+      const [buyerHistory, submittedReviews] = await Promise.all([mobileApi.buyerHistory(), mobileApi.buyerReviews()]);
+      setHistory(buyerHistory);
+      setReviews(submittedReviews);
     } catch (loadError) {
       setError(loadError.message);
     } finally {
@@ -440,6 +443,23 @@ export function BuyerHistoryScreen() {
   }, []);
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
+
+  async function submitReview(order, rating, comment) {
+    const review = await mobileApi.submitOrderReview(order.id, { rating, comment });
+    setReviews(current => [review, ...current]);
+    setHistory(current => ({
+      ...current,
+      orders: current.orders.map(item => item.id === order.id ? { ...item, canReview: false, reviewSubmitted: true } : item)
+    }));
+  }
+
+  async function reportIssue(order, complaint) {
+    await mobileApi.reportOrderDispute(order.id, complaint);
+    setHistory(current => ({
+      ...current,
+      orders: current.orders.map(item => item.id === order.id ? { ...item, canReport: false } : item)
+    }));
+  }
 
   return (
     <Page title="Your activity" subtitle="Review your bidding activity and marketplace orders." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
@@ -476,10 +496,62 @@ export function BuyerHistoryScreen() {
                 <Text style={styles.status}>Payment {order.paymentStatus}</Text>
               </View>
             </View>
+            {order.canReview ? <BuyerOrderFeedback order={order} onReview={submitReview} /> : null}
+            {order.reviewSubmitted ? <Text style={styles.feedbackStatus}>Review submitted · pending moderation</Text> : null}
+            {order.canReport ? <BuyerOrderFeedback order={order} reportOnly onReport={reportIssue} /> : null}
+          </Card>
+        ))}
+        <SectionTitle title="Your submitted reviews" detail={`${reviews.length} reviews`} />
+        {!reviews.length ? <Empty>Reviews you submit will appear here with their moderation status.</Empty> : reviews.map(review => (
+          <Card key={review.id}>
+            <Text style={styles.historyName}>{'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)} · {review.status}</Text>
+            <Text style={styles.muted}>Order {review.order}</Text>
+            {review.comment ? <Text style={styles.muted}>{review.comment}</Text> : null}
           </Card>
         ))}
       </> : null}
     </Page>
+  );
+}
+
+function BuyerOrderFeedback({ order, reportOnly = false, onReview, onReport }) {
+  const [rating, setRating] = useState('5');
+  const [comment, setComment] = useState('');
+  const [open, setOpen] = useState(!reportOnly);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  async function submit() {
+    setError('');
+    setSubmitting(true);
+    try {
+      if (reportOnly) {
+        await onReport(order, comment);
+        setOpen(false);
+      } else {
+        await onReview(order, Number(rating), comment);
+      }
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  if (!open) return <Button label="Report an order issue" variant="secondary" compact onPress={() => setOpen(true)} />;
+  return (
+    <View style={styles.feedbackForm}>
+      {!reportOnly ? <>
+        <Text style={styles.muted}>Rate {order.fisherman}</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {[5, 4, 3, 2, 1].map(value => <Chip key={value} label={`${value} ★`} selected={Number(rating) === value} onPress={() => setRating(String(value))} />)}
+        </ScrollView>
+      </> : <Text style={styles.muted}>Report an issue with this verified paid order (10–2,000 characters).</Text>}
+      <Field label={reportOnly ? 'Describe the issue' : 'Optional feedback'} value={comment} onChangeText={setComment} placeholder={reportOnly ? 'Explain what happened' : 'Share feedback about the order'} multiline />
+      {error ? <Notice>{error}</Notice> : null}
+      <View style={styles.feedbackActions}>
+        {reportOnly ? <Button label="Cancel" variant="secondary" compact onPress={() => setOpen(false)} /> : null}
+        <Button label={submitting ? 'Sending…' : reportOnly ? 'Send report' : 'Submit verified review'} compact onPress={submit} loading={submitting} />
+      </View>
+    </View>
   );
 }
 
@@ -527,5 +599,8 @@ const styles = StyleSheet.create({
   historyCopy: { flex: 1, gap: 4 },
   historyValue: { alignItems: 'flex-end', gap: 5 },
   historyName: { color: colors.ink, fontSize: 14, fontWeight: '800' },
-  status: { color: colors.sea, fontSize: 10, fontWeight: '700', textTransform: 'capitalize' }
+  status: { color: colors.sea, fontSize: 10, fontWeight: '700', textTransform: 'capitalize' },
+  feedbackForm: { gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.line },
+  feedbackActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
+  feedbackStatus: { color: colors.sea, fontSize: 11, fontWeight: '700' }
 });
