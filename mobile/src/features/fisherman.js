@@ -34,6 +34,7 @@ export function FishermanInventoryScreen() {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [priceEstimate, setPriceEstimate] = useState(null);
   const [priceEstimateError, setPriceEstimateError] = useState('');
+  const [editingListing, setEditingListing] = useState(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -50,12 +51,23 @@ export function FishermanInventoryScreen() {
   }, []);
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
+  const priceEstimateKey = JSON.stringify([
+    showForm,
+    form.fishType.trim(),
+    form.quantity,
+    form.quality,
+    form.size,
+    form.freshness || 'fresh',
+    form.location
+  ]);
+  const currentPriceEstimate = priceEstimate?.key === priceEstimateKey ? priceEstimate.value : null;
+
   useEffect(() => {
     if (!showForm || !form.fishType || !form.quantity || Number(form.quantity) <= 0) {
-      setPriceEstimate(null);
       return undefined;
     }
     let active = true;
+    const requestKey = priceEstimateKey;
     const timer = setTimeout(() => {
       mobileApi.previewPricePrediction({
         fishType: form.fishType.trim(),
@@ -66,7 +78,7 @@ export function FishermanInventoryScreen() {
         location: form.location
       }).then(value => {
         if (active) {
-          setPriceEstimate(value);
+          setPriceEstimate({ key: requestKey, value });
           setPriceEstimateError('');
         }
       }).catch(previewError => {
@@ -77,7 +89,7 @@ export function FishermanInventoryScreen() {
       });
     }, 350);
     return () => { active = false; clearTimeout(timer); };
-  }, [showForm, form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
+  }, [priceEstimateKey, showForm, form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
 
   const activeAuctions = listings.filter(item => item.saleMode === 'bid' && ['active', 'scheduled'].includes(item.auction?.status)).length;
   const activeListings = listings.filter(item => ['available', 'auction'].includes(item.status)).length;
@@ -239,6 +251,7 @@ export function FishermanInventoryScreen() {
           detail={`Status: ${item.status || 'unknown'}${item.predictedLow && item.predictedHigh ? ` · Price guide ${money(item.predictedLow)}–${money(item.predictedHigh)}/kg` : ''}`}
           actions={<>
             {item.saleMode === 'bid' && item.auction && ['active', 'scheduled'].includes(item.auction.status) ? <Button label="Stop bidding" variant="secondary" onPress={() => confirmClose(item)} /> : null}
+            {item.saleMode !== 'bid' && item.status === 'available' && !item.auction ? <Button label="Edit listing" variant="secondary" onPress={() => setEditingListing(item)} /> : null}
             {item.status === 'available' && !item.auction ? <Button label="Delete listing" variant="danger" onPress={() => confirmDelete(item)} /> : null}
           </>}
         />
@@ -264,9 +277,9 @@ export function FishermanInventoryScreen() {
             <View style={styles.chips}>
               {['same_day', 'fresh', 'chilled', 'frozen'].map(value => <Chip key={value} label={value.replace('_', ' ')} selected={(form.freshness || 'fresh') === value} onPress={() => updateField('freshness', value)} />)}
             </View>
-            {priceEstimate ? <PricePredictionSummary prediction={priceEstimate} compact /> : null}
-            {priceEstimate && Number(form.price) > 0
-              && (Number(form.price) < priceEstimate.minimumPerKg * 0.8 || Number(form.price) > priceEstimate.maximumPerKg * 1.2)
+            {currentPriceEstimate ? <PricePredictionSummary prediction={currentPriceEstimate} compact /> : null}
+            {currentPriceEstimate && Number(form.price) > 0
+              && (Number(form.price) < currentPriceEstimate.minimumPerKg * 0.8 || Number(form.price) > currentPriceEstimate.maximumPerKg * 1.2)
               ? <Notice>Your chosen price is more than 20% outside this indicative range. This warning will not change your price.</Notice>
               : null}
             {saleMode === 'bid' ? <>
@@ -282,7 +295,82 @@ export function FishermanInventoryScreen() {
           </Card>
         </Page>
       </Modal>
+      {editingListing ? <EditListingModal
+        listing={editingListing}
+        onClose={() => setEditingListing(null)}
+        onSaved={load}
+      /> : null}
     </Page>
+  );
+}
+
+function EditListingModal({ listing, onClose, onSaved }) {
+  const [price, setPrice] = useState(String(listing.salePrice || listing.expectedPrice || ''));
+  const [quantity, setQuantity] = useState(String(listing.quantity || ''));
+  const [freshness, setFreshness] = useState(listing.freshness || 'fresh');
+  const [estimate, setEstimate] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const inputKey = JSON.stringify([listing.fishType, Number(quantity), listing.quality, listing.size, freshness, listing.location]);
+  const currentEstimate = estimate?.key === inputKey ? estimate.value : null;
+
+  useEffect(() => {
+    if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      mobileApi.previewPricePrediction({
+        fishType: listing.fishType,
+        quantity: Number(quantity),
+        quality: listing.quality,
+        size: listing.size,
+        freshness,
+        location: listing.location
+      }).then(value => {
+        if (active) setEstimate({ key: inputKey, value });
+      }).catch(previewError => {
+        if (active) setError(`Price estimate unavailable: ${previewError.message}`);
+      });
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  }, [inputKey, listing.fishType, listing.location, listing.quality, listing.size, quantity, freshness]);
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      await mobileApi.updateListing(listing.id, { price: Number(price), quantity: Number(quantity), freshness });
+      await onSaved();
+      onClose();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const outsideRange = currentEstimate && Number(price) > 0
+    && (Number(price) < currentEstimate.minimumPerKg * 0.8 || Number(price) > currentEstimate.maximumPerKg * 1.2);
+
+  return (
+    <Modal visible animationType="slide" onRequestClose={onClose}>
+      <Page title={`Edit ${listing.fishType}`} subtitle="Update your price, quantity, or reported freshness.">
+        <Card>
+          <Field label="Sale price per kg (₹)" value={price} onChangeText={setPrice} keyboardType="decimal-pad" autoCapitalize="none" />
+          <Field label="Quantity (kg)" value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" autoCapitalize="none" />
+          <Text style={styles.orderMeta}>Reported freshness</Text>
+          <View style={styles.chips}>
+            {['same_day', 'fresh', 'chilled', 'frozen'].map(value => <Chip key={value} label={value.replace('_', ' ')} selected={freshness === value} onPress={() => setFreshness(value)} />)}
+          </View>
+          {currentEstimate ? <PricePredictionSummary prediction={currentEstimate} compact /> : null}
+          {outsideRange ? <Notice>Your chosen price is more than 20% outside this indicative range. This warning will not change your price.</Notice> : null}
+          {error ? <Notice>{error}</Notice> : null}
+          <View style={styles.formActions}>
+            <Button label="Cancel" variant="secondary" onPress={onClose} />
+            <Button label="Save changes" onPress={save} loading={saving} />
+          </View>
+        </Card>
+      </Page>
+    </Modal>
   );
 }
 

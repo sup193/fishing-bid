@@ -79,3 +79,32 @@ test('leaves fishermen without verified activity unrated rather than granting an
   assert.equal(result.level, 'Not yet rated');
   assert.equal(result.averageRating, null);
 });
+
+test('excludes unverified seller cancellations from the cancellation factor', () => {
+  const input = {
+    fisherman,
+    orders: [paidCompletedOrder],
+    listings: [{ id: 'listing-1' }]
+  };
+  const verifiedOnly = calculateFishermanReputation(input);
+  const withUnverifiedCancellation = calculateFishermanReputation({
+    ...input,
+    orders: [
+      ...input.orders,
+      {
+        ...paidCompletedOrder,
+        id: 'unverified-cancellation',
+        transactionRef: '',
+        orderStatus: 'cancelled',
+        cancellationActor: 'fisherman'
+      }
+    ]
+  });
+
+  assert.equal(verifiedOnly.cancellationPercent, 0);
+  assert.equal(withUnverifiedCancellation.cancellationPercent, 0);
+  assert.equal(
+    withUnverifiedCancellation.factors.find(item => item.key === 'cancellations').score,
+    verifiedOnly.factors.find(item => item.key === 'cancellations').score
+  );
+});

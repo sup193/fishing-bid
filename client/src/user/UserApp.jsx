@@ -6,7 +6,7 @@ import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
 import VoiceAssistant from '../voice/VoiceAssistant.jsx';
 import { filterVoiceListings } from '../../../shared/voice/actions.js';
-import PricePredictionTool from '../PricePredictionTool.jsx';
+import PricePredictionTool, { PricePredictionSummary } from '../PricePredictionTool.jsx';
 
 const viewFromHash = () => {
   const hash = window.location.hash.slice(1);
@@ -880,7 +880,9 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
             ? `${selected.fisherman.reputation.score}/100 trust · ${selected.fisherman.reputation.averageRating?.toFixed(1) || '—'} average rating · ${selected.fisherman.reputation.completedOrderCount} verified completed orders`
             : 'No verified completed orders yet; this is not a negative rating.'}</p>
         </section>}
-        {priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative price estimate: {priceGuide(selected)}.</strong> This is guidance only, not a guaranteed sale price or live market quote.</p>}
+        {selected.pricePrediction
+          ? <PricePredictionSummary prediction={selected.pricePrediction} fishType={selected.fishType} />
+          : priceGuide(selected) && <p className="quality-safety-note market-price-guide-note"><strong>Indicative price estimate: {priceGuide(selected)}.</strong> This is guidance only, not a guaranteed sale price or live market quote.</p>}
         {selected.saleMode === 'bid' && <>
           <div className="auction-live-summary">
             <article><span>Current highest bid</span><strong>₹{Number(selected.auction?.currentPrice || selected.auction?.startPrice || selected.expectedPrice).toLocaleString()}<small>/kg</small></strong></article>

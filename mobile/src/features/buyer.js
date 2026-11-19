@@ -4,6 +4,7 @@ import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, S
 import { mobileApi } from '../../api';
 import { useAuth } from '../auth/AuthContext';
 import VoiceAssistantPanel from '../components/VoiceAssistant';
+import { PricePredictionSummary } from '../components/PricePrediction';
 import { filterVoiceListings } from '../../../shared/voice/actions';
 
 const filters = ['All catches', 'Fixed price', 'Auctions', 'For you'];
@@ -292,6 +293,9 @@ export function BuyerMarketScreen() {
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>{selectedAuction?.fishType} auction</Text>
               <Text style={styles.modalSubtitle}>Fisherman: {selectedAuction?.fisherman?.name || 'Local fisherman'}</Text>
+              {selectedAuction?.pricePrediction
+                ? <PricePredictionSummary prediction={selectedAuction.pricePrediction} fishType={selectedAuction.fishType} />
+                : null}
               <View style={styles.auctionFacts}>
                 <Text style={styles.auctionFact}>Current bid: {money(activeAuction?.currentPrice || activeAuction?.startPrice)}/kg</Text>
                 <Text style={styles.auctionFact}>Minimum increment: {money(activeAuction?.minimumIncrement)}/kg</Text>

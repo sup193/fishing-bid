@@ -59,9 +59,9 @@ export function calculateFishermanReputation({
   const verifiedDisputes = disputes.filter(dispute => dispute.fisherman === fisherman?.id
     && dispute.finding === 'confirmed'
     && verifiedOrders.some(order => order.id === dispute.order));
-  const sellerCancellations = fishermanOrders.filter(order => order.orderStatus === 'cancelled'
+  const sellerCancellations = verifiedOrders.filter(order => order.orderStatus === 'cancelled'
     && order.cancellationActor === 'fisherman');
-  const cancellationSample = verifiedOrders.length + sellerCancellations.filter(order => !verifiedOrders.includes(order)).length;
+  const cancellationSample = verifiedOrders.length;
   const timedDeliveries = completedOrders.filter(order => Number.isFinite(Date.parse(order.expectedDeliveryAt || ''))
     && Number.isFinite(Date.parse(order.deliveredAt || '')));
   const onTimeDeliveries = timedDeliveries.filter(order => Date.parse(order.deliveredAt) <= Date.parse(order.expectedDeliveryAt));

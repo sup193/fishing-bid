@@ -75,6 +75,10 @@ The checkout uses Razorpay Checkout and must be configured with Razorpay API key
 
 Orders marked paid by the old demo checkout are not treated as verified Razorpay transactions and are excluded from verified paid-volume totals.
 
+### Fisherman reputation and fish-price estimates
+
+The marketplace shows an explainable fisherman trust score based on verified paid orders, approved reviews, recorded delivery data, administrator-reviewed disputes, and verification status. Buyers may review only their own verified completed orders; reviews are moderated before being included in public scores. The price assistant uses a transparent baseline until enough verified sales exist to evaluate a regression calibration. Recommendations are estimates, not guaranteed prices, and never overwrite a fisherman’s chosen listing price. See [FISHERMAN_TRUST_AND_AI_PRICE_PREDICTION_REPORT.md](./FISHERMAN_TRUST_AND_AI_PRICE_PREDICTION_REPORT.md) for formulas, database nodes, endpoints, model evaluation rules, testing status, and limitations.
+
 ## Fish image classifier
 
 The 31-class model is trained from `dataset/FishImgDataset/` with EfficientNetB0 transfer learning:

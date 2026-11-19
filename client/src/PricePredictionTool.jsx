@@ -11,8 +11,9 @@ const initialInput = () => ({
   seasonMonth: String(new Date().getMonth() + 1)
 });
 
-export function PricePredictionSummary({ prediction, compact = false }) {
+export function PricePredictionSummary({ prediction, compact = false, fishType }) {
   if (!prediction) return null;
+  const species = fishType || prediction.input?.fishType;
   const estimate = Number(prediction.estimatePerKg ?? prediction.pricePrediction?.estimatePerKg);
   const low = Number(prediction.minimumPerKg ?? prediction.pricePrediction?.minimumPerKg ?? prediction.predictedLow);
   const high = Number(prediction.maximumPerKg ?? prediction.pricePrediction?.maximumPerKg ?? prediction.predictedHigh);
@@ -24,7 +25,7 @@ export function PricePredictionSummary({ prediction, compact = false }) {
   const maxHistory = Math.max(1, ...history.map(item => item.averagePricePerKg));
   return <section className={`price-prediction-result${compact ? ' is-compact' : ''}`} aria-label="Estimated market price">
     <div className="price-prediction-heading">
-      <div><p className="kicker">MARKET PRICE ESTIMATE</p><h3>Indicative value</h3></div>
+      <div><p className="kicker">MARKET PRICE ESTIMATE</p><h3>{species || 'Indicative value'}</h3></div>
       <span className={`prediction-reliability reliability-${reliability}`}>{reliability === 'validated' ? 'Validated model' : 'Preliminary estimate'}</span>
     </div>
     <div className="price-prediction-values">
@@ -34,6 +35,7 @@ export function PricePredictionSummary({ prediction, compact = false }) {
       <article><span>Market trend</span><strong>{prediction.trend?.direction || 'Stable'}</strong></article>
     </div>
     <p className="prediction-model-note">{model} · {prediction.confidence || 'No sufficient verified sales for calibration.'}</p>
+    {prediction.asOf && <p className="prediction-model-note">Estimate date: {new Date(prediction.asOf).toLocaleDateString()}</p>}
     {!compact && history.length > 0 && <div className="prediction-history" aria-label="Historical verified sale prices">
       <strong>Verified sales history · ₹/kg</strong>
       <div className="prediction-history-chart">

@@ -11,7 +11,7 @@ import { PricePredictionSummary } from '../PricePredictionTool.jsx';
 const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
 export default function FishermanDashboard({ user, onUserUpdate, initialView = 'inventory', onViewChange }) {
-  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null);
+  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null);
   useEffect(() => setView(initialView), [initialView]);
   const loadListings = () => api.fishermanListings().then(setListings).catch(err => setError(err.message));
   const loadSales = () => api.fishermanSales().then(setSales).catch(err => setError(err.message));
@@ -77,6 +77,16 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
   const submit = async event => { event.preventDefault(); setError(''); try { const expectedPrice = mode === 'bid' ? Number(form.expectedPrice) : Number(form.salePrice); const listing = await api.createListing({ ...form, saleMode: mode, expectedPrice, salePrice: Number(form.salePrice || expectedPrice), quantity: Number(form.quantity) }); if (mode === 'bid') await api.createAuction(listing.id, { startPrice: expectedPrice, minimumIncrement: Number(form.minimumIncrement), startTime: new Date().toISOString(), endTime: new Date(form.endTime).toISOString() }); setMessage(mode === 'bid' ? 'Bidding listing created.' : 'Sale listing created.'); setForm(emptyForm); setMode(null); setView('inventory'); loadListings(); } catch (err) { setError(err.message); } };
   const closeBid = async id => { try { const result = await api.closeAuction(id); setMessage(result.winnerName ? `Bidding stopped. ${result.winnerName} won at ₹${Number(result.winningBid).toLocaleString()}/kg. Checkout is ready.` : 'Bidding stopped with no bids.'); loadListings(); loadSales(); } catch (err) { setError(err.message); } };
   const deleteListing = async id => { if (!window.confirm('Delete this fish listing?')) return; try { await api.deleteListing(id); setMessage('Listing deleted.'); loadListings(); } catch (err) { setError(err.message); } };
+  const saveListingEdit = async (listing, changes) => {
+    try {
+      await api.updateListing(listing.id, changes);
+      setMessage('Listing updated with a refreshed price estimate.');
+      setEditingListing(null);
+      loadListings();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   const progressOrder = async (order, status) => { setError(''); try { await api.updateOrderStatus(order.id, status); setMessage(`Order marked ${status}.`); loadSales(); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); } catch (err) { setError(err.message); } };
   const scheduleDelivery = async (order, date) => { const expectedDeliveryAt = Date.parse(`${date}T23:59:59`); if (!Number.isFinite(expectedDeliveryAt)) { setError('Choose an expected delivery date.'); return; } setError(''); try { await api.setDeliverySchedule(order.id, new Date(expectedDeliveryAt).toISOString()); setMessage('Expected delivery date saved.'); loadSales(); } catch (err) { setError(err.message); } };
   const startPost = () => { setForm(emptyForm); setMode(null); setView('inventory'); };
@@ -121,10 +131,11 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
         </div>
       </section>
       {mode && <ListingForm mode={mode} form={form} meta={meta} imageUploading={imageUploading} onChange={updateForm} onImage={uploadImage} onSubmit={submit} onBack={() => setMode(null)} />}
+      {editingListing && <ListingEditor listing={editingListing} onClose={() => setEditingListing(null)} onSave={saveListingEdit} />}
       <div className="fisherman-inventory-lists">
         <section className="catch-list inventory-sale-list">
           <div className="panel-title"><div className="inventory-list-heading"><span className="inventory-list-icon"><ShoppingBag size={17} /></span><span><p className="kicker">DIRECT SALES</p><h2>Fixed-price listings</h2></span></div><span className="inventory-list-count">{saleListings.length} {saleListings.length === 1 ? 'catch' : 'catches'}</span></div>
-          {saleListings.map(item => <CatchRow key={item.id} item={item} onClose={closeBid} onDelete={deleteListing} />)}
+          {saleListings.map(item => <CatchRow key={item.id} item={item} onClose={closeBid} onDelete={deleteListing} onEdit={setEditingListing} />)}
           {!saleListings.length && <p className="empty inventory-empty">No fixed-price catches yet. Choose Fixed price to create one.</p>}
         </section>
         <section className="catch-list inventory-bid-list">
@@ -222,7 +233,7 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
     </form>
   </section>;
 }
-function CatchRow({ item, onClose, onDelete }) {
+function CatchRow({ item, onClose, onDelete, onEdit }) {
   const auction = item.auction;
   const image = sampleImageFor(item);
   const low = Number(item.predictedLow);
@@ -244,9 +255,64 @@ function CatchRow({ item, onClose, onDelete }) {
     <div className="catch-side">
       <strong>₹{item.saleMode === 'bid' ? auction?.currentPrice || item.expectedPrice : item.salePrice || item.expectedPrice}<small>/kg</small></strong>
       {canClose && <button className="button small dark" onClick={() => onClose(auction.id)}>Stop bidding</button>}
+      {item.saleMode !== 'bid' && item.status === 'available' && <button className="button small secondary" onClick={() => onEdit(item)}>Edit listing</button>}
       {canDelete && <button className="icon-button danger" title="Delete listing" onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}
     </div>
   </article>;
+}
+
+function ListingEditor({ listing, onClose, onSave }) {
+  const [price, setPrice] = useState(String(listing.salePrice || listing.expectedPrice || ''));
+  const [quantity, setQuantity] = useState(String(listing.quantity || ''));
+  const [freshness, setFreshness] = useState(listing.freshness || 'fresh');
+  const [estimate, setEstimate] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const inputKey = JSON.stringify([listing.fishType, Number(quantity), listing.quality, listing.size, freshness, listing.location]);
+  const prediction = estimate?.key === inputKey ? estimate.value : null;
+  const outsideRange = prediction && Number(price) > 0
+    && (Number(price) < prediction.minimumPerKg * 0.8 || Number(price) > prediction.maximumPerKg * 1.2);
+
+  useEffect(() => {
+    if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) return undefined;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api.previewPricePrediction({
+        fishType: listing.fishType,
+        quantity: Number(quantity),
+        quality: listing.quality,
+        size: listing.size,
+        freshness,
+        location: listing.location
+      }).then(value => {
+        if (active) setEstimate({ key: inputKey, value });
+      }).catch(requestError => {
+        if (active) setError(`Price estimate unavailable: ${requestError.message}`);
+      });
+    }, 300);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [inputKey, listing.fishType, listing.location, listing.quality, listing.size, quantity, freshness]);
+
+  const submit = async event => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    await onSave(listing, { price: Number(price), quantity: Number(quantity), freshness });
+    setSaving(false);
+  };
+
+  return <section className="panel listing-edit-panel">
+    <div className="panel-title"><div><p className="kicker">REFRESH YOUR LISTING</p><h2>Edit {listing.fishType}</h2></div><button className="text-button" type="button" onClick={onClose}>Cancel</button></div>
+    <form className="listing-form" onSubmit={submit}>
+      <label className="listing-field"><span>Sale price / kg</span><input type="number" min="0.01" step="0.01" value={price} onChange={event => setPrice(event.target.value)} required /></label>
+      <label className="listing-field"><span>Quantity (kg)</span><input type="number" min="0.1" step="0.1" value={quantity} onChange={event => setQuantity(event.target.value)} required /></label>
+      <label className="listing-field"><span>Reported freshness</span><select value={freshness} onChange={event => setFreshness(event.target.value)}><option value="same_day">Same-day</option><option value="fresh">Fresh</option><option value="chilled">Chilled</option><option value="frozen">Frozen</option></select></label>
+      {prediction && <PricePredictionSummary prediction={prediction} compact />}
+      {outsideRange && <p className="price-warning" role="status">Your selected price is more than 20% outside this indicative range. This is only a warning; your chosen price will not be changed.</p>}
+      {error && <p className="notice" role="alert">{error}</p>}
+      <button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save listing changes'}</button>
+    </form>
+  </section>;
 }
 function OrdersPage({ orders, onStatus, onSchedule }) { const [dates, setDates] = useState({}); return <section className="panel fisherman-data"><div className="panel-title"><h2>Orders from buyers</h2><span>{orders.length} orders</span></div>{orders.map(order => { const next = order.orderStatus === 'processing' ? 'delivered' : order.orderStatus === 'delivered' ? 'completed' : null; const verified = order.paymentStatus === 'paid' && order.gateway === 'razorpay' && Boolean(order.transactionRef); return <div key={order.id} className="fisherman-order-management"><OrderRow order={order} />{verified && !['completed', 'cancelled'].includes(order.orderStatus) && <div className="delivery-schedule-controls"><label>Expected delivery date<input type="date" value={dates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? ''} onChange={event => setDates(current => ({ ...current, [order.id]: event.target.value }))} /></label><button className="button small secondary" onClick={() => onSchedule(order, dates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? '')}>Save date</button></div>}{verified && next && <button className="button small primary" onClick={() => onStatus(order, next)}>Mark {next}</button>}</div>; })}{!orders.length && <p className="empty">No buyer orders yet.</p>}</section>; }
 function SalesPage({ orders }) { const completed = orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay'); const total = completed.reduce((sum, order) => sum + Number(order.amount || 0), 0); return <section className="panel fisherman-data"><div className="panel-title"><h2>Selling data</h2><span>Total ₹{total.toLocaleString()}</span></div>{completed.map(order => <OrderRow key={order.id} order={order} sale />)}{!completed.length && <p className="empty">Verified Razorpay payments will appear here after buyer checkout.</p>}</section>; }
