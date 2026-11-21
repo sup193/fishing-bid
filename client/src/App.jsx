@@ -24,15 +24,11 @@ export default function App() {
     localStorage.clear();
     setUser(null);
   };
-  const updateUser = nextUser => {
-    localStorage.setItem('tide_user', JSON.stringify(nextUser));
-    setUser(nextUser);
-  };
   const rolePage = user?.role === 'admin'
     ? <AdminDashboard />
     : user?.role === 'fisherman'
-      ? <FishermanDashboard user={user} onUserUpdate={updateUser} initialView={fishermanView} onViewChange={setFishermanView} />
-      : <UserApp user={user} onAuth={setAuthMode} onUserUpdate={updateUser} />;
+      ? <FishermanDashboard initialView={fishermanView} onViewChange={setFishermanView} />
+      : <UserApp user={user} onAuth={setAuthMode} />;
 
   return <>
     <header className="topbar">

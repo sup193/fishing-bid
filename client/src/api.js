@@ -36,7 +36,6 @@ export const api = {
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   register: body => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   me: () => request('/auth/me'),
-  updatePreferredLanguage: preferredLanguage => request('/auth/preferences', { method: 'PATCH', body: JSON.stringify({ preferredLanguage }) }),
   orders: () => request('/orders'),
   updateOrderStatus: (orderId, status) => request(`/orders/${encodeURIComponent(orderId)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   setDeliverySchedule: (orderId, expectedDeliveryAt) => request(`/orders/${encodeURIComponent(orderId)}/delivery-schedule`, { method: 'PATCH', body: JSON.stringify({ expectedDeliveryAt }) }),

@@ -51,7 +51,7 @@ All demo accounts use the password `TideDemo!2026`:
 
 ### Mobile app
 
-The Expo app has role-specific tabs for buyers, fishermen, and admins, including marketplace browsing, manual and automatic auction bidding, live auction details and notices, the auction/listing/verified-sales trend chart, listing and order management, buyer approvals, moderation, bid review, and transaction history. See [mobile/README.md](./mobile/README.md) for setup instructions. Native Razorpay checkout is not enabled yet; buyers can use the website to complete a payment.
+The Expo app has role-specific tabs for buyers, fishermen, and admins, including marketplace browsing and text search, manual and automatic auction bidding, live auction details and notices, the auction/listing/verified-sales trend chart, listing and order management, buyer approvals, moderation, bid review, and transaction history. Voice Marketplace and speech-command features are not included. See [mobile/README.md](./mobile/README.md) for setup instructions. Native Razorpay checkout is not enabled yet; buyers can use the website to complete a payment.
 
 ### Auction settlement and bid review
 

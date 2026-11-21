@@ -207,4 +207,10 @@ export function where(items, filters = {}) { return items.filter(item => Object.
 export function sortNewest(items) { return [...items].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)); }
 export function sortAmount(items) { return [...items].sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0)); }
 export function sortEnd(items) { return [...items].sort((a, b) => new Date(a.endTime || 0) - new Date(b.endTime || 0)); }
-export function sanitizeUser(user) { if (!user) return null; const { passwordHash, ...safe } = user; return safe; }
+export function sanitizeUser(user) {
+  if (!user) return null;
+  const safe = { ...user };
+  delete safe.passwordHash;
+  delete safe.preferredLanguage;
+  return safe;
+}

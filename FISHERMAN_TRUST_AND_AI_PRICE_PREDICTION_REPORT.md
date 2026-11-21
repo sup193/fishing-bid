@@ -125,7 +125,7 @@ All authenticated endpoints use the existing JWT authentication and role middlew
 - Web: `npm.cmd run build --prefix client` — succeeded after the seller edit UI change.
 - Mobile: `npx.cmd expo export --platform web --output-dir "$env:TEMP\\tidemarket-mobile-export-check"` — succeeded. `npm.cmd run lint --prefix mobile -- --ignore-pattern src/components/common.js` — passed. Full `npm.cmd run lint --prefix mobile` still reports one pre-existing `react-hooks/set-state-in-effect` error in `mobile/src/components/common.js`; the same rule also found and was corrected in the seller estimate workflow.
 - Firebase credentials are not supplied to this task’s test setup, so live Firebase persistence/deployment was not exercised; API tests use the project’s local JSON adapter.
-- Existing backend test suite also covers auction bidding/automatic bidding, payment state, auth/roles, language preferences, Firebase default-deny rules, and voice-related API access.
+- Existing backend test suite also covers auction bidding/automatic bidding, payment state, auth/roles, Firebase default-deny rules, and marketplace API access.
 
 ## Limitations and future improvements
 

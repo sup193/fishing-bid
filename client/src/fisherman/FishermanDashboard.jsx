@@ -4,14 +4,13 @@ import { api } from '../api.js';
 import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
-import VoiceAssistant from '../voice/VoiceAssistant.jsx';
 import ReputationPanel from '../ReputationPanel.jsx';
 import { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
 
 const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
-export default function FishermanDashboard({ user, onUserUpdate, initialView = 'inventory', onViewChange }) {
+export default function FishermanDashboard({ initialView = 'inventory', onViewChange }) {
   const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null); const [chatAuction, setChatAuction] = useState(null);
   useEffect(() => setView(initialView), [initialView]);
   const loadListings = () => api.fishermanListings().then(setListings).catch(err => setError(err.message));
@@ -113,7 +112,6 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
     </section>
     {message && <p className="success-notice"><CheckCircle2 size={16} /> {message}</p>}
     {error && <p className="notice"><XCircle size={16} /> {error}</p>}
-    {user && <VoiceAssistant user={user} onUserUpdate={onUserUpdate} onActionComplete={() => { loadListings(); loadSales(); }} />}
     <section className="fisherman-overview" aria-label="Fisherman business overview">
       <article><span className="fisherman-overview-icon"><PackageCheck size={18} /></span><small>Active listings</small><strong>{openListings}</strong><span>Catch lots open to buyers</span></article>
       <article><span className="fisherman-overview-icon"><Gavel size={18} /></span><small>Live auctions</small><strong>{activeAuctions}</strong><span>Listings receiving bids</span></article>

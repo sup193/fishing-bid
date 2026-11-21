@@ -131,8 +131,7 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
 
   await logout(page, 'fisherman');
   await login(page, 'buyer-1@auction.test');
-  await page.getByLabel('Type a command').fill('Find Mackerel');
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.locator('.seafood-category-card').filter({ has: page.getByText('Fish', { exact: true }) }).click();
   const buyerCard = page.locator('.market-listing-section[aria-labelledby="fresh-catch-title"] .market-product-card').filter({ hasText: location });
   await expect(buyerCard).toBeVisible();
   const wishlist = buyerCard.getByRole('button', { name: 'Add Mackerel to wishlist' });

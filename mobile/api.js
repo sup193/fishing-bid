@@ -53,7 +53,6 @@ export const mobileApi = {
   setToken: token => { authToken = token; },
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   me: token => request('/auth/me', { token }),
-  updatePreferredLanguage: preferredLanguage => request('/auth/preferences', { method: 'PATCH', body: json({ preferredLanguage }) }),
   listings: () => request('/listings'),
   marketTrends: days => request(`/market/trends?days=${encodeURIComponent(days)}`),
   demandForecast: filters => request(`/demand/forecast${queryString(filters)}`),

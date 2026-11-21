@@ -19,20 +19,12 @@ test('Expo buyer navigates all tabs, keeps session on refresh, and is redirected
   await expect(page.getByText('Fresh from the coast.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'ಕನ್ನಡ' }).click();
-  await expect(page.getByText('ಧ್ವನಿ ಮಾರುಕಟ್ಟೆ')).toBeVisible();
   const token = await tokenFor(page);
-  const preferences = await page.request.get('http://127.0.0.1:5000/api/auth/me', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  expect((await preferences.json()).user.preferredLanguage).toBe('kn');
-  await page.getByRole('button', { name: 'English' }).click();
-  await expect(page.getByText('Voice marketplace')).toBeVisible();
-
   await page.getByText('Price guide', { exact: true }).click();
   await expect(page).toHaveURL(/\/buyer\/prices$/);
   await expect(page.getByText('Fish price estimate')).toBeVisible();
-  await page.getByRole('button', { name: 'Mackerel' }).click();
+  const speciesField = page.getByText('Fish species', { exact: true }).locator('..');
+  await speciesField.getByRole('button', { name: 'Mackerel' }).click();
   await page.getByPlaceholder('e.g. 10').fill('10');
   const predictionResponse = page.waitForResponse(response => response.url().endsWith('/api/price-predictions') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Get price estimate' }).click();

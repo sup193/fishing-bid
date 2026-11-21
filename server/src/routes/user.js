@@ -7,7 +7,6 @@ import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { SUPPORTED_LANGUAGES } from '../../../shared/voice/languages.js';
 import { get, insert, list, update, remove, reserveListing, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
@@ -55,7 +54,6 @@ const limitFishDetection = (req, res, next) => {
   for (const [ip, value] of detectionAttempts) if (value.resetAt <= now) detectionAttempts.delete(ip);
   next();
 };
-const preferredLanguages = new Set(SUPPORTED_LANGUAGES.map(language => language.code));
 const validMoney = value => Number.isFinite(value) && value > 0
   && Number.isSafeInteger(Math.round(value * 100))
   && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
@@ -63,8 +61,7 @@ const publicUser = user => ({
   id: user.id,
   name: user.name,
   email: user.email,
-  role: user.role,
-  preferredLanguage: preferredLanguages.has(user.preferredLanguage) ? user.preferredLanguage : 'en'
+  role: user.role
 });
 const fishermanFor = async id => sanitizeUser(await get('users', id));
 const listingView = async (listing, reputation = undefined) => {
@@ -406,15 +403,6 @@ router.post('/auth/register', async (req, res) => {
 });
 router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed' }); } });
 router.get('/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
-router.patch('/auth/preferences', requireAuth, async (req, res) => {
-  const { preferredLanguage } = req.body;
-  if (!preferredLanguages.has(preferredLanguage)) {
-    return res.status(400).json({ message: 'Choose a supported marketplace language' });
-  }
-  const user = await update('users', req.user.id, { preferredLanguage });
-  if (!user) return res.status(404).json({ message: 'User not found' });
-  res.json({ user: publicUser(user) });
-});
 router.get('/fisherman/reputation', requireAuth, allow('fisherman'), async (req, res) => {
   const reputation = await getFishermanReputation(req.user.id);
   if (!reputation) return res.status(404).json({ message: 'Fisherman profile not found' });
@@ -616,7 +604,7 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
   };
   let listing;
   if (requestId) {
-    const id = `voice_${createHash('sha256').update(`${req.user.id}:${requestId}`).digest('hex')}`;
+    const id = `listing_${createHash('sha256').update(`${req.user.id}:${requestId}`).digest('hex')}`;
     const now = new Date().toISOString();
     const result = await transact('listings', id, current => current ? undefined : {
       ...fields,

@@ -3,8 +3,6 @@ import { Alert, Image, Modal, ScrollView, StyleSheet, Text, View } from 'react-n
 import * as ImagePicker from 'expo-image-picker';
 import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, Stat, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
-import { useAuth } from '../auth/AuthContext';
-import VoiceAssistantPanel from '../components/VoiceAssistant';
 import { ReputationSummary } from '../components/Reputation';
 import { PricePredictionSummary } from '../components/PricePrediction';
 
@@ -22,7 +20,6 @@ const blankListing = {
 };
 
 export function FishermanInventoryScreen() {
-  const { user, updateUser } = useAuth();
   const [listings, setListings] = useState([]);
   const [form, setForm] = useState(blankListing);
   const [saleMode, setSaleMode] = useState('sale');
@@ -287,7 +284,6 @@ export function FishermanInventoryScreen() {
       {error ? <Notice>{error}</Notice> : null}
       {priceEstimateError && showForm ? <Notice>Price estimate unavailable: {priceEstimateError}</Notice> : null}
       {message ? <Notice type="success">{message}</Notice> : null}
-      {user ? <VoiceAssistantPanel user={user} onUserUpdate={updateUser} onActionComplete={load} /> : null}
       <View style={styles.stats}>
         <Stat label="Active listings" value={activeListings} />
         <Stat label="Open auctions" value={activeAuctions} />

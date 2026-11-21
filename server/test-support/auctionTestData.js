@@ -84,7 +84,7 @@ export async function createAuctionDatabase(databasePath) {
   addAuction('auction-late', {
     auction: { endTime: new Date(now + 20_000).toISOString() }
   });
-  addAuction('auction-voice', { fishType: 'Tilapia' });
+  addAuction('auction-insights', { fishType: 'Tilapia' });
   addAuction('auction-web', { fishType: 'Mackerel' });
   addAuction('auction-mobile', { fishType: 'Sardine' });
   addAuction('auction-notifications', { fishType: 'Anchovy' });

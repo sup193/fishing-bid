@@ -4,8 +4,6 @@ import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
-import VoiceAssistant from '../voice/VoiceAssistant.jsx';
-import { filterVoiceListings } from '../../../shared/voice/actions.js';
 import PricePredictionTool, { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
 
@@ -240,7 +238,7 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
   </section>;
 }
 
-export default function UserApp({ user, onAuth, onUserUpdate }) {
+export default function UserApp({ user, onAuth }) {
   const wishlistStorageKey = `tide_wishlist_${user?.id || 'guest'}`;
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -285,7 +283,6 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
   const [recommendationSaleMode, setRecommendationSaleMode] = useState('all');
   const [recommendationWishlistOnly, setRecommendationWishlistOnly] = useState(false);
   const [listingError, setListingError] = useState('');
-  const [voiceSearch, setVoiceSearch] = useState(null);
   const [demandFishType, setDemandFishType] = useState('');
 
   useEffect(() => {
@@ -471,7 +468,6 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
   const visible = items.filter(item => {
     const category = categories.find(option => option.name === selectedCategory);
     return (selectedCategory === 'All' || category?.matches(item))
-      && (!voiceSearch || filterVoiceListings([item], voiceSearch).length > 0)
       && (!demandFishType || item.fishType === demandFishType);
   }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const guestPreviewItems = visible.slice(0, 3);
@@ -775,15 +771,6 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       </section>}
       {user ? <section className="market buyer-market" id="market">
         {listingError && <p className="notice market-listing-error" role="status">Could not refresh marketplace listings: {listingError}. Showing the latest available listings.</p>}
-        {user.role === 'buyer' && <VoiceAssistant
-          user={user}
-          onUserUpdate={onUserUpdate}
-          onSearch={intent => {
-            setVoiceSearch(intent);
-            setSelectedCategory('All');
-            window.location.hash = '#market';
-          }}
-        />}
         <section className="market-pulse-section" aria-label="Live market pulse">
           <MarketTrendChart
             data={trendData}
@@ -928,7 +915,6 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       <DemandForecastPanel role="buyer" listings={items} onExploreFish={fishType => {
         setDemandFishType(fishType);
         setSelectedCategory('All');
-        setVoiceSearch(null);
         window.location.hash = '#market';
         window.requestAnimationFrame(() => document.querySelector('#fresh-catch-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       }} />

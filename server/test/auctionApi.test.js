@@ -349,16 +349,16 @@ test('automatic bidding can be capped by a buyer-private total budget', async ()
 });
 
 test('auction insights are authenticated, use preliminary history honestly and include existing market estimates', async () => {
-  const before = await api('/auctions/auction-voice');
-  const insight = await api('/auctions/auction-voice/insights', { token: await tokenFor(1) });
+  const before = await api('/auctions/auction-insights');
+  const insight = await api('/auctions/auction-insights/insights', { token: await tokenFor(1) });
   assert.equal(insight.response.status, 200);
   assert.equal(insight.data.confidence, 'low');
   assert.equal(insight.data.verifiedHistoricalAuctionCount, 0);
   assert.equal(insight.data.priceEstimate.reliability, 'preliminary');
   assert.equal(insight.data.demand.dataAvailability, 'insufficient_data');
   assert.equal(JSON.stringify(insight.data).includes('autoBids'), false);
-  assert.equal((await api('/auctions/auction-voice/insights')).response.status, 401);
-  const after = await api('/auctions/auction-voice');
+  assert.equal((await api('/auctions/auction-insights/insights')).response.status, 401);
+  const after = await api('/auctions/auction-insights');
   assert.equal(after.data.auction.currentPrice, before.data.auction.currentPrice);
   assert.equal(after.data.bids.length, before.data.bids.length);
 
@@ -366,7 +366,7 @@ test('auction insights are authenticated, use preliminary history honestly and i
     method: 'POST',
     body: { email: 'fisherman@auction.test', password: 'auction-test-password' }
   });
-  assert.equal((await api('/auctions/auction-voice/insights', { token: fisherman.data.token })).response.status, 403);
+  assert.equal((await api('/auctions/auction-insights/insights', { token: fisherman.data.token })).response.status, 403);
 });
 
 test('auction chat validates messages, limits rate, and supports report moderation', async () => {

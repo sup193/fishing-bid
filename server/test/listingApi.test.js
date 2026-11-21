@@ -36,10 +36,10 @@ async function tokenFor(email, role) {
 }
 
 before(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-voice-api-test-'));
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-listing-api-test-'));
   process.env.TIDEMARKET_DATABASE = 'local';
   process.env.TIDEMARKET_LOCAL_DB_PATH = path.join(tempDir, 'local-db.json');
-  process.env.JWT_SECRET = 'test-only-voice-jwt-secret';
+  process.env.JWT_SECRET = 'test-only-listing-jwt-secret';
   process.env.RAZORPAY_KEY_ID = '';
   process.env.RAZORPAY_KEY_SECRET = '';
   process.env.RAZORPAY_WEBHOOK_SECRET = '';
@@ -75,43 +75,6 @@ test('buyer registration validates name, email, and password before creating a p
   assert.equal(valid.data.status, 'pending');
 });
 
-test('language preference requires an authenticated user and only accepts supported language codes', async () => {
-  const unauthenticated = await api('/auth/preferences', {
-    method: 'PATCH',
-    body: { preferredLanguage: 'kn' }
-  });
-  assert.equal(unauthenticated.response.status, 401);
-
-  const buyer = await tokenFor('buyer-1@auction.test', 'buyer');
-  const invalidSession = await api('/auth/preferences', {
-    token: 'invalid-token',
-    method: 'PATCH',
-    body: { preferredLanguage: 'kn' }
-  });
-  assert.equal(invalidSession.response.status, 401);
-
-  const updated = await api('/auth/preferences', {
-    token: buyer,
-    method: 'PATCH',
-    body: { preferredLanguage: 'kn', role: 'admin' }
-  });
-  assert.equal(updated.response.status, 200);
-  assert.equal(updated.data.user.preferredLanguage, 'kn');
-  assert.equal(updated.data.user.role, 'buyer');
-  assert.equal(updated.data.user.passwordHash, undefined);
-
-  const me = await api('/auth/me', { token: buyer });
-  assert.equal(me.response.status, 200);
-  assert.equal(me.data.user.preferredLanguage, 'kn');
-
-  const unsupported = await api('/auth/preferences', {
-    token: buyer,
-    method: 'PATCH',
-    body: { preferredLanguage: 'fr' }
-  });
-  assert.equal(unsupported.response.status, 400);
-});
-
 test('listing actions enforce role, input validation, ownership and auction edit restrictions', async () => {
   const buyer = await tokenFor('buyer-1@auction.test', 'buyer');
   const owner = await tokenFor('fisherman@auction.test', 'fisherman');
@@ -125,7 +88,7 @@ test('listing actions enforce role, input validation, ownership and auction edit
     expectedPrice: 300,
     salePrice: 300,
     saleMode: 'sale',
-    requestId: 'voice-create-request-001'
+    requestId: 'listing-create-request-001'
   };
 
   const unauthorizedCreate = await api('/listings', {
@@ -137,7 +100,7 @@ test('listing actions enforce role, input validation, ownership and auction edit
   const invalidCreate = await api('/listings', {
     token: owner,
     method: 'POST',
-    body: { ...listingBody, quantity: 0, requestId: 'voice-invalid-request-01' }
+    body: { ...listingBody, quantity: 0, requestId: 'listing-invalid-request-01' }
   });
   assert.equal(invalidCreate.response.status, 400);
 
@@ -145,7 +108,7 @@ test('listing actions enforce role, input validation, ownership and auction edit
   assert.equal(created.response.status, 201);
   assert.equal(created.data.fisherman, 'fisherman-1');
   assert.equal(created.data.fishType, 'Tuna');
-  assert.match(created.data.id, /^voice_[a-f0-9]{64}$/);
+  assert.match(created.data.id, /^listing_[a-f0-9]{64}$/);
 
   const duplicate = await api('/listings', { token: owner, method: 'POST', body: listingBody });
   assert.equal(duplicate.response.status, 200);
@@ -212,7 +175,7 @@ test('listing actions enforce role, input validation, ownership and auction edit
   assert.equal(otherListings.data.some(item => item.id === created.data.id), false);
 });
 
-test('buyer and fisherman role restrictions apply to voice-related marketplace endpoints', async () => {
+test('buyer and fisherman role restrictions apply to marketplace listing and bidding endpoints', async () => {
   const buyer = await tokenFor('buyer-2@auction.test', 'buyer');
   const owner = await tokenFor('fisherman@auction.test', 'fisherman');
 
@@ -224,7 +187,7 @@ test('buyer and fisherman role restrictions apply to voice-related marketplace e
   const fishermanBid = await api('/auctions/auction-live/bids', {
     token: owner,
     method: 'POST',
-    body: { amount: 550, requestId: 'voice-fisherman-bid-01' }
+    body: { amount: 550, requestId: 'fisherman-bid-request-01' }
   });
   assert.equal(fishermanBid.response.status, 403);
   const buyerListings = await api('/fisherman/listings', { token: buyer });

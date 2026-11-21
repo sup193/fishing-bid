@@ -3,22 +3,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, SectionTitle, Stat, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
-import { useAuth } from '../auth/AuthContext';
-import VoiceAssistantPanel from '../components/VoiceAssistant';
 import { PricePredictionSummary } from '../components/PricePrediction';
-import { filterVoiceListings } from '../../../shared/voice/actions';
 
 const filters = ['All catches', 'Fixed price', 'Auctions', 'For you'];
 
 export function BuyerMarketScreen() {
-  const { user, updateUser } = useAuth();
   const { fishType } = useLocalSearchParams();
   const router = useRouter();
   const [listings, setListings] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [filter, setFilter] = useState('All catches');
   const [search, setSearch] = useState('');
-  const [voiceFilter, setVoiceFilter] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -171,9 +166,9 @@ export function BuyerMarketScreen() {
           : true;
       const query = (search || (typeof fishType === 'string' ? fishType : '')).trim().toLowerCase();
       const matchesQuery = !query || `${item.fishType} ${item.location} ${item.fisherman?.name || ''}`.toLowerCase().includes(query);
-      return matchesMode && matchesQuery && (!voiceFilter || filterVoiceListings([item], voiceFilter).length > 0);
+      return matchesMode && matchesQuery;
     });
-  }, [filter, fishType, listings, recommendations, search, voiceFilter]);
+  }, [filter, fishType, listings, recommendations, search]);
 
   const activeAuction = auctionDetail?.auction || selectedAuction?.auction;
   const minimumBid = Number(activeAuction?.minimumBid || Number(activeAuction?.currentPrice || activeAuction?.startPrice || selectedAuction?.expectedPrice || 0)
@@ -272,12 +267,6 @@ export function BuyerMarketScreen() {
     <Page title="Fresh from the coast." subtitle="Browse direct-sale catches and live auctions from local fishermen." onRefresh={() => { setRefreshing(true); load(); loadTrends(); }} refreshing={refreshing}>
       {message ? <Notice type="success">{message}</Notice> : null}
       {error ? <Notice>{error}</Notice> : null}
-      {user ? <VoiceAssistantPanel
-        user={user}
-        onUserUpdate={updateUser}
-        onSearch={intent => { setVoiceFilter(intent); setFilter('All catches'); setSearch(''); }}
-        onActionComplete={load}
-      /> : null}
       <View style={styles.stats}>
         <Stat label="Available catches" value={listings.length} />
         <Stat label="Live auctions" value={listings.filter(item => item.saleMode === 'bid' && item.auction?.status === 'active').length} />

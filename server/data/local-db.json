@@ -3,10 +3,10 @@
     "users_1791880077852_e0251699ad6f8": {
       "name": "Tide Admin",
       "email": "tide@gmail.com",
-      "passwordHash": "$2b$12$la4R0af/4fNa.xR98x5NzuGBKG76YF/F4PYEiKr11aAViytPBZWBm",
+      "passwordHash": "$2b$12$J2MeqDPcGg/2VKa25tyQvu7Wqavfwt2QtC3BcFIMFXv4CsrD4mwDS",
       "role": "admin",
       "createdAt": "2026-10-13T08:27:57.852Z",
-      "updatedAt": "2026-11-14T13:57:11.160Z",
+      "updatedAt": "2026-11-21T06:24:57.174Z",
       "phone": "+91 90000 00000",
       "location": "Karnataka Coast",
       "status": "approved"
@@ -1561,6 +1561,59 @@
       "demo": true,
       "createdAt": "2026-10-31T13:00:00.000Z",
       "updatedAt": "2026-11-12T16:19:48.059Z"
+    }
+  },
+  "notifications": {
+    "close_demo-auction-anchovy_demo-buyer-1": {
+      "user": "demo-buyer-1",
+      "auction": "demo-auction-anchovy",
+      "type": "auction_won",
+      "title": "You won the auction",
+      "message": "You won at ₹240/kg. Your checkout is ready.",
+      "read": false,
+      "createdAt": "2026-11-21T06:28:51.924Z",
+      "updatedAt": "2026-11-21T06:28:51.924Z"
+    },
+    "close_demo-auction-anchovy_demo-buyer-3": {
+      "user": "demo-buyer-3",
+      "auction": "demo-auction-anchovy",
+      "type": "auction_lost",
+      "title": "Auction ended",
+      "message": "Anchovy ended at ₹240/kg.",
+      "read": false,
+      "createdAt": "2026-11-21T06:28:51.926Z",
+      "updatedAt": "2026-11-21T06:28:51.926Z"
+    },
+    "close_demo-auction-anchovy_demo-buyer-2": {
+      "user": "demo-buyer-2",
+      "auction": "demo-auction-anchovy",
+      "type": "auction_lost",
+      "title": "Auction ended",
+      "message": "Anchovy ended at ₹240/kg.",
+      "read": false,
+      "createdAt": "2026-11-21T06:28:51.930Z",
+      "updatedAt": "2026-11-21T06:28:51.930Z"
+    }
+  },
+  "pricePredictions": {
+    "pricePrediction_1795242569614_b38b55b6308a98": {
+      "requestedBy": "demo-buyer-1",
+      "requestedRole": "buyer",
+      "input": {
+        "fishType": "Mussels",
+        "quantity": 3,
+        "quality": "Good",
+        "size": "Medium",
+        "freshness": "fresh",
+        "location": "",
+        "seasonMonth": 11
+      },
+      "estimatePerKg": 320,
+      "estimatedTotal": 960,
+      "reliability": "preliminary",
+      "model": "Transparent rule baseline",
+      "createdAt": "2026-11-21T06:29:29.612Z",
+      "updatedAt": "2026-11-21T06:29:29.614Z"
     }
   }
 }
