@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { get, insert, list, update, remove, reserveListing, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -337,41 +337,15 @@ async function beginRazorpayPayment(order, address) {
 }
 
 async function failPayment(transaction, reason) {
-  await update('payments', transaction.id, {
-    status: 'failed',
-    failureReason: String(reason || 'Payment was not completed').slice(0, 160)
-  });
-  const order = await get('orders', transaction.order);
-  if (!order) return;
-  await update('orders', order.id, { paymentStatus: 'failed', orderStatus: 'payment-failed' });
-  if (order.listing && order.purchaseType === 'buyout') {
-    const listing = await get('listings', order.listing);
-    if (listing?.status === 'reserved' && listing.reservedBy === order.buyer) {
-      await update('listings', listing.id, { status: 'available', reservedBy: null });
-    }
-  }
+  await persistPaymentFailed(transaction, reason);
 }
 
 async function markPaymentPaid(transaction, payment) {
   const order = await get('orders', transaction.order);
   if (!order) return null;
   const paidAt = payment.created_at ? new Date(payment.created_at * 1000).toISOString() : new Date().toISOString();
-  const paidTransaction = await update('payments', transaction.id, {
-    status: 'paid',
-    gatewayPaymentId: payment.id,
-    paymentMethod: payment.method,
-    paidAt
-  });
-  await update('orders', order.id, {
-    paymentStatus: 'paid',
-    orderStatus: 'processing',
-    paymentMethod: 'razorpay',
-    gateway: 'razorpay',
-    gatewayOrderId: transaction.gatewayOrderId,
-    transactionRef: payment.id,
-    paidAt
-  });
-  if (order.listing) await update('listings', order.listing, { status: 'sold', reservedBy: null });
+  const paidTransaction = await persistPaymentPaid(transaction, payment, paidAt);
+  if (!paidTransaction) return null;
   if (order.fisherman) await refreshFishermanReputation(order.fisherman);
   return paidTransaction;
 }
@@ -711,7 +685,7 @@ router.post('/listings/:id/auction', requireAuth, allow('fisherman'), async (req
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime < Date.now() - 60_000 || endTime <= Date.now() || endTime <= startTime) {
     return res.status(400).json({ message: 'Auction start and end times are invalid' });
   }
-  const auction = await insert('auctions', {
+  const auction = await createAuctionForListing(listing.id, {
     listing: listing.id,
     startPrice,
     currentPrice: startPrice,
@@ -727,7 +701,7 @@ router.post('/listings/:id/auction', requireAuth, allow('fisherman'), async (req
     bidHistory: {},
     processedRequests: {}
   });
-  await update('listings', listing.id, { status: 'auction' });
+  if (!auction) return res.status(409).json({ message: 'Listing is no longer available for auction' });
   res.status(201).json(publicAuction(auction));
 });
 router.get('/auctions/:id', async (req, res) => {
@@ -1131,24 +1105,8 @@ router.post('/payments/razorpay/orders', requireAuth, allow('buyer'), async (req
     if (existing) {
       order = existing;
     } else {
-      if (!await reserveListing(listing.id, req.user.id)) return res.status(409).json({ message: 'This fish is no longer available' });
-      try {
-        order = await insert('orders', {
-          orderNumber: `TM-${Date.now()}`,
-          listing: listing.id,
-          buyer: req.user.id,
-          fisherman: listing.fisherman,
-          quantity: Number(listing.quantity),
-          amount: Number(listing.salePrice || listing.expectedPrice) * Number(listing.quantity),
-          paymentStatus: 'pending',
-          orderStatus: 'awaiting-payment',
-          purchaseType: 'buyout',
-          ...(req.body.address ? { address: req.body.address } : {})
-        });
-      } catch (error) {
-        await update('listings', listing.id, { status: 'available', reservedBy: null });
-        throw error;
-      }
+      order = await createBuyoutOrder({ listing, buyerId: req.user.id, address: req.body.address });
+      if (!order) return res.status(409).json({ message: 'This fish is no longer available' });
     }
   } else {
     return res.status(400).json({ message: 'Provide a listingId, auctionId, or orderId' });

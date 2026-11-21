@@ -2,13 +2,20 @@
   "name": "smart-fishing-api",
   "version": "1.0.0",
   "type": "module",
-  "scripts": {"dev": "node --watch src/index.js", "start": "node src/index.js", "seed:demo": "node src/seed-demo.js", "test": "node --test"},
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed:demo": "node src/seed-demo.js",
+    "migration:export-firebase": "node scripts/export-firebase.mjs",
+    "migration:import-firebase": "node scripts/import-firebase.mjs",
+    "test": "node --test"
+  },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.2",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
-    "firebase-admin": "^14.5.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",

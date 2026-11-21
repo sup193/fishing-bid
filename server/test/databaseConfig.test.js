@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { initFirebase } from '../src/db.js';
+import { initSupabase } from '../src/db.js';
 
 const environmentKeys = [
   'NODE_ENV',
   'TIDEMARKET_DATABASE',
-  'FIREBASE_SERVICE_ACCOUNT_JSON',
-  'FIREBASE_CLIENT_EMAIL',
-  'FIREBASE_PRIVATE_KEY'
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY'
 ];
 
 function withEnvironment(values, callback) {
@@ -28,15 +27,15 @@ function withEnvironment(values, callback) {
 
 test('production refuses to use the local database', () => {
   withEnvironment({ NODE_ENV: 'production', TIDEMARKET_DATABASE: 'local' }, () => {
-    assert.throws(() => initFirebase(), /local database cannot be used in production/i);
+    assert.throws(() => initSupabase(), /local database cannot be used in production/i);
   });
 });
 
-test('production surfaces invalid Firebase credentials instead of falling back locally', () => {
+test('production refuses to start with incomplete Supabase credentials', () => {
   withEnvironment({
     NODE_ENV: 'production',
-    FIREBASE_SERVICE_ACCOUNT_JSON: '{'
+    SUPABASE_URL: 'https://jrgkxtlcuakxvdkqygxs.supabase.co'
   }, () => {
-    assert.throws(() => initFirebase());
+    assert.throws(() => initSupabase(), /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required|Set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/);
   });
 });

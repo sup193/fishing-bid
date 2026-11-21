@@ -38,6 +38,14 @@ export default defineConfig({
       timeout: 60_000
     },
     {
+      command: 'node server/test-support/startAuctionApi.js',
+      cwd: projectRoot,
+      url: 'http://127.0.0.1:5001/api/health',
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: { PORT: '5001' }
+    },
+    {
       command: 'npm run dev -- --host 127.0.0.1 --port 5173',
       cwd: clientDir,
       url: 'http://127.0.0.1:5173',
@@ -53,7 +61,7 @@ export default defineConfig({
       env: {
         CI: '1',
         NODE_OPTIONS: '--max-old-space-size=4096',
-        EXPO_PUBLIC_API_URL: 'http://127.0.0.1:5000/api'
+        EXPO_PUBLIC_API_URL: 'http://127.0.0.1:5001/api'
       }
     }
   ]

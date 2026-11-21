@@ -8,7 +8,7 @@ import morgan from 'morgan';
 import bcrypt from 'bcryptjs';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
-import { initFirebase, insert, list } from './db.js';
+import { initSupabase, insert, list } from './db.js';
 import { refreshAuction } from './utils.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env') });
@@ -83,10 +83,10 @@ async function settleAuctions() {
 }
 export async function startServer({ port = process.env.PORT || 5000, sweepIntervalMs = 15_000 } = {}) {
   validateProductionConfig();
-  const database = initFirebase();
-  if (database) console.log('Firebase Realtime Database: connecting...');
+  const database = initSupabase();
+  if (database) console.log('Supabase PostgreSQL: checking database connection and schema...');
   await seed();
-  console.log(database ? 'Firebase Realtime Database: connected' : 'Local database: ready');
+  console.log(database ? 'Supabase PostgreSQL: ready' : 'Local database: ready');
   await settleAuctions();
   const sweep = setInterval(settleAuctions, sweepIntervalMs);
   const server = await new Promise((resolveServer, reject) => {
@@ -115,7 +115,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     await startServer();
   } catch (error) {
-    console.error('Firebase Realtime Database: failed:', error.message);
+    console.error('Database startup failed:', error.message);
     process.exitCode = 1;
   }
 }

@@ -17,15 +17,12 @@ process.env.ADMIN_EMAIL = 'admin@auction.test';
 process.env.ADMIN_PASSWORD = 'auction-test-password';
 process.env.NODE_ENV = 'test';
 process.env.CLIENT_URL = '*';
-process.env.PORT = '5000';
+process.env.PORT = process.env.PORT || '5000';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_fixture';
 process.env.RAZORPAY_KEY_SECRET = 'test-only-e2e-razorpay-secret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'test-only-e2e-webhook-secret';
-delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-delete process.env.FIREBASE_CLIENT_EMAIL;
-delete process.env.FIREBASE_PRIVATE_KEY;
-delete process.env.FIREBASE_PROJECT_ID;
-delete process.env.FIREBASE_DATABASE_URL;
+delete process.env.SUPABASE_URL;
+delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 await createAuctionDatabase(databasePath);
 const database = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
 database.reviews = {

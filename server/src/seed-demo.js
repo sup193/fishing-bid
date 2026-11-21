@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
-import fs from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,28 +7,26 @@ const serverDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(serverDirectory, '../../');
 dotenv.config({ path: resolve(projectRoot, '.env') });
 
-const firebaseConfigured = Boolean(
-  process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
-  (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) ||
-  fs.existsSync(resolve(serverDirectory, '../firebase-service-account.json'))
-);
+const supabaseConfigured = Boolean(process.env.SUPABASE_URL || process.env.SUPABASE_SERVICE_ROLE_KEY);
 const useLocalDatabase = process.argv.includes('--local');
-const allowFirebase = process.argv.includes('--allow-firebase');
+const allowSupabase = process.argv.includes('--allow-supabase');
 const resetActivity = process.argv.includes('--reset-activity');
 
-if (useLocalDatabase && allowFirebase) {
-  throw new Error('Choose either --local or --allow-firebase, not both.');
+if (useLocalDatabase && allowSupabase) {
+  throw new Error('Choose either --local or --allow-supabase, not both.');
 }
 if (useLocalDatabase) process.env.TIDEMARKET_DATABASE = 'local';
-if (firebaseConfigured && !allowFirebase && !useLocalDatabase) {
-  throw new Error('Firebase credentials are configured. Use --local to seed local demo data or --allow-firebase only if you intend to add demo records to Firebase.');
+if (supabaseConfigured && !allowSupabase && !useLocalDatabase) {
+  throw new Error('Supabase credentials are configured. Use --local to seed local demo data or --allow-supabase only if you intend to add demo records to Supabase.');
 }
-if (allowFirebase && !firebaseConfigured) throw new Error('Firebase was requested but no Firebase Admin credentials are configured.');
-if (resetActivity && !useLocalDatabase && !allowFirebase) {
-  throw new Error('Activity reset requires an explicit --local or --allow-firebase target.');
+if (allowSupabase && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+  throw new Error('Supabase was requested but SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not both configured.');
+}
+if (resetActivity && !useLocalDatabase && !allowSupabase) {
+  throw new Error('Activity reset requires an explicit --local or --allow-supabase target.');
 }
 
-const { insert, list, update, remove, clearCollections } = await import('./db.js');
+const { insert, list, update, clearCollections } = await import('./db.js');
 const password = 'TideDemo!2026';
 const passwordHash = await bcrypt.hash(password, 12);
 const now = Date.now();
@@ -109,13 +106,6 @@ for (const id of auctionIds) {
 }
 
 if (resetActivity) {
-  for (const user of users) {
-    const userIndex = existingUsers.findIndex(record => record.id === user.id && record.demo);
-    if (userIndex >= 0) {
-      await remove('users', user.id);
-      existingUsers.splice(userIndex, 1);
-    }
-  }
   await clearCollections(['bids', 'orders', 'payments']);
 }
 

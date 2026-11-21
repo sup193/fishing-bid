@@ -1,15 +1,20 @@
 # TideMarket Smart Fishing Platform
 
-This is a React and Express smart fishing marketplace with Firebase Realtime Database, separated user/admin code, auctions, bidding, orders, and role-based access.
+TideMarket is a React and Express smart fishing marketplace backed by Supabase PostgreSQL. The Express API remains the only database client; the React web and Expo mobile apps continue to use its existing API and JWT authentication.
 
-## MERN quick start
+## Local setup
 
-1. If a root `.env` does not exist, copy `.env.example` to `.env`. If it already exists, keep its existing Firebase settings and add only the missing variables.
-2. In Firebase Console, open **Project settings → Service accounts** and generate a private key. Add it to the root `.env` as `FIREBASE_SERVICE_ACCOUNT_JSON`, or set `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` separately.
-3. For test payments, create Razorpay **Test Mode** API keys in the Razorpay Dashboard and set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in `.env`. The server accepts only `rzp_test_` keys in this implementation. Never expose the API secret in client code. Without the API keys, checkout reports that the gateway is not configured and does not mark orders paid.
+1. Copy `.env.example` to `.env` and set `SUPABASE_URL` and the backend-only `SUPABASE_SERVICE_ROLE_KEY`. The configured project URL is `https://jrgkxtlcuakxvdkqygxs.supabase.co`. Never put the service role key in a `VITE_` variable, the mobile app, or an API response.
+2. Apply [`supabase/migrations/202611210001_tidemarket_schema.sql`](./supabase/migrations/202611210001_tidemarket_schema.sql) in the Supabase SQL Editor (or with your approved migration runner).
+3. For test payments, create Razorpay **Test Mode** API keys in the Razorpay Dashboard and set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in `.env`. The server accepts only `rzp_test_` keys and never marks an order paid without gateway verification.
 4. Run `npm install` in the root, then `npm run install:all`.
-5. Start both applications with `npm run dev`.
-6. Open `http://localhost:5173`.
+5. Start both applications with `npm run dev` and open `http://localhost:5173`.
+
+When Supabase credentials are absent, non-production backend runs use the existing local JSON adapter for development and tests. Production startup requires Supabase credentials and will not fall back to local storage. The service role key belongs only in the server's environment.
+
+### Import existing Firebase data
+
+The migration scripts export the Firebase root to a local JSON file and import the recognized collections in dependency order. Set the temporary Firebase export credentials described in [`server/README.md`](./server/README.md), run `npm run migration:export-firebase --prefix server`, review the export, and then run `npm run migration:import-firebase --prefix server -- --confirm-append-only` after applying the SQL migration. The importer never overwrites rows with matching IDs, keeps nested auction history, and emits a count/relationship/error report. It does not delete Firebase data. Credentials and exports are local-only; the export/report paths are ignored by Git.
 
 The React user surface is in `client/src/user/` and the admin surface is in `client/src/admin/`. API modules live under `server/src/routes/`. The administrator account is seeded when the API starts:
 
@@ -23,11 +28,11 @@ The credentials above are development defaults only. Production startup requires
 
 The login and account-creation forms use standard username/password autocomplete fields so Chrome/Google Password Manager can offer to save or autofill each account after you sign in. Accept Chrome's **Save password?** prompt and choose the Google account/profile where you want it stored. If the prompt is not shown, use the key icon in Chrome's address bar or check Chrome → **Settings → Password Manager**. TideMarket stores account passwords as bcrypt hashes; it does not send plaintext passwords to Google. Admin, buyer, and fisherman logins use the same compatible login form.
 
-The API stores users, listings, auctions, bids, orders, and payment attempts in Firebase Realtime Database under the `users`, `listings`, `auctions`, `bids`, `orders`, and `payments` nodes. Its indicative price guide is a transparent rule-based estimate in `server/src/utils.js`, based on species, seller-reported grade, size, and quantity. It is not an ML prediction or a live market quote, and it does not guarantee a sale price. Seafood quality grades are seller-reported; photo identification checks species only and does not detect freshness or food safety.
+The API stores users, listings, auctions, bids, orders, payments, and related records in relational PostgreSQL tables. See [`supabase/README.md`](./supabase/README.md) for table relationships, RPC concurrency controls, RLS policy, and data migration steps. Its indicative price guide is a transparent rule-based estimate in `server/src/utils.js`, based on species, seller-reported grade, size, and quantity. It is not an ML prediction or a live market quote, and it does not guarantee a sale price. Seafood quality grades are seller-reported; photo identification checks species only and does not detect freshness or food safety.
 
 ### Explore the complete marketplace with demo data
 
-For a local walkthrough, run `npm run seed:demo` from the project root, then open `http://localhost:5173`. The command is repeatable and adds labeled practice records without overwriting existing records. It creates four fisherman accounts, three buyer accounts, 15 seafood species, a mix of fixed-price and auction listings, bid history, and pending practice checkouts with practice-only transaction entries. Demo checkouts are not real payments and are never marked as verified/paid. The seed command refuses to write when Firebase credentials are configured unless you explicitly run `npm run seed:demo --prefix server -- --allow-firebase`.
+For a local walkthrough, run `npm run seed:demo` from the project root, then open `http://localhost:5173`. The command is repeatable and adds labeled practice records without overwriting existing records. It creates four fisherman accounts, three buyer accounts, 15 seafood species, a mix of fixed-price and auction listings, bid history, and pending practice checkouts with practice-only transaction entries. Demo checkouts are not real payments and are never marked as verified/paid. When Supabase credentials are configured, seeding requires explicit `npm run seed:demo --prefix server -- --allow-supabase`; use `--local` to seed only the local JSON adapter.
 
 All demo accounts use the password `TideDemo!2026`:
 
@@ -55,11 +60,11 @@ The Expo app has role-specific tabs for buyers, fishermen, and admins, including
 
 ### Auction settlement and bid review
 
-The API checks auctions on startup and every 15 seconds. When an auction reaches its end time, it closes automatically, records the highest bidder as the winner, and creates a pending checkout order. A fisherman can also stop bidding early from Inventory; the same winner settlement runs immediately. Fishermen can review auction history in **Bid history**, and administrators can review all auctions under **Bid review**.
+The API checks auctions on startup and every 15 seconds. When an auction reaches its end time, it closes automatically, records the highest bidder as the winner, and creates a pending checkout order. A fisherman can also stop bidding early from Inventory; the same winner settlement runs immediately. Auction status changes use a database-side optimistic transaction and row-version check; settlement creates its winning order in the same PostgreSQL transaction. Fishermen can review auction history in **Bid history**, and administrators can review all auctions under **Bid review**.
 
 Buyer auction details poll the API for live bid history and timer updates. Manual bids and automatic maximums are validated and serialized in an auction-record transaction. Automatic limits and bidder offer ceilings are stored privately under each auction and removed from public API responses; each accepted leading bid is also mirrored to the existing `bids` node for dashboard and history compatibility. Automatic bidding raises the public price only as needed, breaks equal maximums in favor of the earlier eligible offer, and never bids above a buyer's configured limit. A valid bid in the final 30 seconds extends the server-owned end time by 30 seconds. Auction results use the transactionally stored leader and price, then create the existing pending Razorpay checkout order.
 
-The API stores auction activity in `auctions/{id}` (`currentPrice`, `currentBidder`, `bidCount`, `bidderOffers`, `autoBids`, `bidHistory`, and request de-duplication keys), mirrors bid records to `bids`, and writes bid/closure notices for buyers and fishermen to `notifications`. The maximum amounts are private application data and are not returned by public listing or auction endpoints. Deploy [database.rules.json](./database.rules.json) to Firebase Realtime Database to deny direct client reads and writes; the server's Firebase Admin SDK continues to perform authorized operations. Do not give browser or mobile clients Firebase Admin credentials.
+Auction records retain private proxy-bid state in server-only `auctions` columns while each bid is also represented in the relational `bids` table. Database-side version checks serialize concurrent updates and retry the application transform against the latest committed state. Buyer ceilings are omitted from public listing and auction API responses. All tables have RLS enabled with direct `anon` and `authenticated` access denied; the Express API enforces the existing JWT, role, and ownership checks while using the service role key.
 
 New bids are flagged for human review when one buyer places at least five bids in 60 seconds, or when a bid is at least twice the previous high and exceeds it by at least five minimum increments. These are review signals, not proof of fraud; bids are not blocked automatically. The bid review screens show the full bid timeline and flagged activity.
 
@@ -69,7 +74,7 @@ The buyer auction view includes an advisory next-bid suggestion, a final-price r
 
 Automatic bidding can be limited by both a maximum bid per kilogram and an optional maximum total spend for the full listing. The backend derives the effective per-kilogram cap from the listing quantity, stores both limits privately with the auction, and never exposes them in public auction responses. Fishermen can answer buyer questions in a per-auction chat. Chat is visible to signed-in buyers and the listing fisherman, caps message length, rate-limits sends, and rejects email addresses and phone-like contact strings. Buyers can report messages for administrator review; moderation can hide or restore a message.
 
-Admin auction analytics aggregate auctions and bids by species and location, with optional date/species/category/location/status filters. Bid concentration and rapid-bid signals are rule-based review prompts only. Neither those signals nor chat reports automatically block bids, cancel auctions, or establish misconduct. Auction details continue using the existing short-interval API refresh in web and mobile; the project does not currently have client-authorized Firebase listeners or a WebSocket/SSE transport. Notifications for outbids, leading-bid changes, new seller bids, closing, and settlement remain in the notification workflow.
+Admin auction analytics aggregate auctions and bids by species and location, with optional date/species/category/location/status filters. Bid concentration and rapid-bid signals are rule-based review prompts only. Neither those signals nor chat reports automatically block bids, cancel auctions, or establish misconduct. Auction details continue using the existing short-interval API refresh in web and mobile; the project does not currently have database client listeners or a WebSocket/SSE transport. Notifications for outbids, leading-bid changes, new seller bids, closing, and settlement remain in the notification workflow.
 
 The new authenticated endpoints are:
 
@@ -83,7 +88,7 @@ The new authenticated endpoints are:
 | `GET /api/admin/auction-chat/reports` | Admin | List pending chat reports |
 | `PATCH /api/admin/auction-chat/:id/moderation` | Admin | Hide or restore a reported message |
 
-Chat records and rate-limit markers are stored in the server-only `auctionMessages`, `auctionMessageReports`, and `auctionChatRateLimits` Firebase nodes. Budget ceilings remain in the existing private `auctions/{id}/autoBids` data. No Firebase client rule was loosened; deploy the existing default-deny [database.rules.json](./database.rules.json), and continue accessing these nodes only through the authenticated Express API/Firebase Admin SDK.
+Chat messages, reports, and hashed rate-limit markers are stored in server-only relational tables. Automatic bid ceilings remain private auction data and are never returned by public APIs. Continue accessing these tables only through authenticated Express endpoints.
 
 ### Upload a real catch photo
 
@@ -95,7 +100,7 @@ Photo identification requires the actual `server/models/fish_classifier.keras` w
 
 ### Razorpay checkout and transaction history
 
-The checkout uses Razorpay Checkout and must be configured with Razorpay API keys. The server creates INR payment orders, verifies the checkout signature, confirms/captures the payment with Razorpay, and only then marks an order paid. Payment attempts are recorded in the `payments` node; buyers, fishermen, and admins have role-scoped transaction-history views. Configure the Razorpay webhook at `/api/payments/razorpay/webhook` with the `RAZORPAY_WEBHOOK_SECRET` from the Razorpay Dashboard, subscribing to `payment.captured`, `order.paid`, and `payment.failed`, so payment updates are still recorded if a buyer closes the browser before returning from checkout. Test keys do not charge real money. Use Razorpay's test payment details while testing. This implementation accepts test keys only.
+The checkout uses Razorpay Checkout and must be configured with Razorpay API keys. The server creates INR payment orders, verifies the checkout signature, confirms/captures the payment with Razorpay, and only then marks an order paid. Payment attempts are recorded in the `payments` table; the database makes payment finalization idempotent and updates its order and listing in one transaction. Buyers, fishermen, and admins have role-scoped transaction-history views. Configure the Razorpay webhook at `/api/payments/razorpay/webhook` with the `RAZORPAY_WEBHOOK_SECRET` from the Razorpay Dashboard, subscribing to `payment.captured`, `order.paid`, and `payment.failed`, so payment updates are still recorded if a buyer closes the browser before returning from checkout. Test keys do not charge real money. Use Razorpay's test payment details while testing. This implementation accepts test keys only.
 
 Orders marked paid by the old demo checkout are not treated as verified Razorpay transactions and are excluded from verified paid-volume totals.
 
@@ -122,7 +127,7 @@ Demand endpoints (all require bearer-token authentication):
 | `GET /api/admin/demand/analytics` | Admin | Filterable aggregate demand analytics |
 | `GET /api/admin/demand/performance` | Admin | Walk-forward forecast evaluation |
 
-Optional query filters are `from` and `to` (`YYYY-MM-DD`), `fishType`, `category`, and `location`; date ranges are limited to 366 days. Forecast and performance results are computed from existing `orders`, `listings`, `auctions`, and `bids` nodes; no duplicate demand-history node or model training store is required. Existing Firebase rules remain default-deny for direct client access; the authenticated Express API uses Firebase Admin. See [AI_DEMAND_FORECASTING_REPORT.md](./AI_DEMAND_FORECASTING_REPORT.md) for implementation details, evaluation status, setup, and limitations.
+Optional query filters are `from` and `to` (`YYYY-MM-DD`), `fishType`, `category`, and `location`; date ranges are limited to 366 days. Forecast and performance results are computed from existing `orders`, `listings`, `auctions`, and `bids` tables; no duplicate demand-history table is required. RLS denies direct client access; the authenticated Express API uses the Supabase service role key and enforces the existing role and ownership checks. See [AI_DEMAND_FORECASTING_REPORT.md](./AI_DEMAND_FORECASTING_REPORT.md) for implementation details, evaluation status, setup, and limitations.
 
 Run validation from the repository root:
 

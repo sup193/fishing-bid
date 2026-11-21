@@ -14,3 +14,6 @@ server/uploads/
 server/models/
 firebase-service-account.json
 server/firebase-service-account.json
+server/data/firebase-export.json
+server/data/firebase-import-report-*.json
+firebase-export*.json

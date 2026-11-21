@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const password = 'auction-test-password';
+const apiBaseUrl = 'http://127.0.0.1:5001/api';
 const pixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l3sAAAAASUVORK5CYII=', 'base64');
 
 async function login(page, email) {
@@ -51,7 +52,7 @@ test('Expo buyer navigates all tabs, keeps session on refresh, and is redirected
   const anchovy = page.getByText('Anchovy', { exact: true }).last();
   await expect(anchovy).toBeVisible();
   const card = anchovy.locator('xpath=../..');
-  const auctionResponse = await page.request.get('http://127.0.0.1:5000/api/auctions/auction-notifications', {
+  const auctionResponse = await page.request.get(`${apiBaseUrl}/auctions/auction-notifications`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   expect(auctionResponse.status()).toBe(200);
@@ -62,7 +63,7 @@ test('Expo buyer navigates all tabs, keeps session on refresh, and is redirected
   await expect(page.getByText(new RegExp(`Your ₹${auction.minimumBid}/kg bid was submitted`))).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
   await page.reload();
-  const notificationsBefore = await page.request.get('http://127.0.0.1:5000/api/notifications', {
+  const notificationsBefore = await page.request.get(`${apiBaseUrl}/notifications`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   expect(notificationsBefore.status()).toBe(200);
@@ -73,7 +74,7 @@ test('Expo buyer navigates all tabs, keeps session on refresh, and is redirected
   const unreadBefore = allNotificationsBefore.filter(notification => !notification.read);
   await expect(page.getByText('Auction notifications')).toBeVisible();
   await page.getByRole('button', { name: 'Read' }).first().click();
-  const notificationsAfter = await page.request.get('http://127.0.0.1:5000/api/notifications', {
+  const notificationsAfter = await page.request.get(`${apiBaseUrl}/notifications`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   expect((await notificationsAfter.json()).filter(notification => !notification.read).length).toBeLessThan(unreadBefore.length);
@@ -124,7 +125,7 @@ test('Expo fisherman handles the catch form, photo upload, and listing creation 
   await expect(page.getByText(new RegExp(location))).toBeVisible();
 
   const token = await tokenFor(page);
-  const response = await page.request.get('http://127.0.0.1:5000/api/fisherman/listings', {
+  const response = await page.request.get(`${apiBaseUrl}/fisherman/listings`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   expect(response.status()).toBe(200);
@@ -135,7 +136,7 @@ test('Expo fisherman handles the catch form, photo upload, and listing creation 
   expect(created.quantity).toBe(8);
   expect(created.salePrice).toBe(650);
   expect(created.imageUrl).toContain('/uploads/');
-  const uploadedPhoto = await page.request.get(`http://127.0.0.1:5000${created.imageUrl}`);
+  const uploadedPhoto = await page.request.get(`http://127.0.0.1:5001${created.imageUrl}`);
   expect(uploadedPhoto.status()).toBe(200);
 
   await page.getByRole('button', { name: 'Log out' }).first().click();
