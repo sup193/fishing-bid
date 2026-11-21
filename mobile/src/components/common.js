@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -112,7 +112,12 @@ export function Field({ label, value, onChangeText, placeholder, keyboardType = 
 
 export function Chip({ label, selected, onPress }) {
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected && styles.selectedChip]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: Boolean(selected) }}
+      onPress={onPress}
+      style={[styles.chip, selected && styles.selectedChip]}
+    >
       <Text style={[styles.chipText, selected && styles.selectedChipText]}>{label}</Text>
     </Pressable>
   );
@@ -183,14 +188,13 @@ export function ListingCard({ item, actions, detail }) {
 
 function ListingPhoto({ item }) {
   const uri = resolveImageUrl(item?.imageUrl);
-  const [imageError, setImageError] = useState(false);
-
-  useEffect(() => setImageError(false), [uri]);
+  const [failedUri, setFailedUri] = useState('');
+  const imageError = Boolean(uri && failedUri === uri);
 
   return uri && !imageError
     ? <Image
       accessibilityLabel={`${item.fishType || 'Catch'} photo`}
-      onError={() => setImageError(true)}
+      onError={() => setFailedUri(uri)}
       resizeMode="cover"
       source={{ uri }}
       style={styles.listingPhoto}

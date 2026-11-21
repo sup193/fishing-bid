@@ -10,6 +10,7 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
   expect: { timeout: 12_000 },
+  workers: 1,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   reporter: 'list',
@@ -40,7 +41,7 @@ export default defineConfig({
       command: 'npm run dev -- --host 127.0.0.1 --port 5173',
       cwd: clientDir,
       url: 'http://127.0.0.1:5173',
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 60_000
     },
     {
@@ -51,6 +52,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         CI: '1',
+        NODE_OPTIONS: '--max-old-space-size=4096',
         EXPO_PUBLIC_API_URL: 'http://127.0.0.1:5000/api'
       }
     }

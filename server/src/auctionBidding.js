@@ -72,6 +72,7 @@ export function recalculateAuctionOffers(auction, bidId, now = Date.now()) {
 export function applyAuctionOffer(auction, {
   buyerId,
   amount,
+  totalBudget,
   mode,
   bidId,
   requestId,
@@ -101,12 +102,14 @@ export function applyAuctionOffer(auction, {
   let offerSequence = Number(auction.offerSequence || 0);
   if (mode === 'automatic') {
     const sameLimit = Number(autoBids[buyerId]?.amount) === amount
+      && Number(autoBids[buyerId]?.totalBudget || 0) === Number(totalBudget || 0)
       && Number(bidderOffers[buyerId]?.sequence || autoBids[buyerId]?.sequence) > 0;
     const sequence = sameLimit
       ? Number(bidderOffers[buyerId]?.sequence || autoBids[buyerId]?.sequence || nextSequence)
       : nextSequence;
     autoBids[buyerId] = {
       amount,
+      ...(totalBudget ? { totalBudget } : {}),
       sequence,
       createdAt: sameLimit ? autoBids[buyerId]?.createdAt || new Date(now).toISOString() : new Date(now).toISOString(),
       updatedAt: new Date(now).toISOString()

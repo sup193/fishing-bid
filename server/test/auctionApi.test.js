@@ -214,6 +214,12 @@ test('automatic bidding stays private, updates limits and resolves competing buy
   assert.ok(notifications.data.some(item => item.type === 'outbid'));
   const otherNotifications = await api('/notifications', { token: buyerTwo });
   assert.equal(otherNotifications.data.some(item => item.user === 'buyer-1'), false);
+  const fishermanLogin = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'fisherman@auction.test', password: 'auction-test-password' }
+  });
+  const fishermanNotifications = await api('/notifications', { token: fishermanLogin.data.token });
+  assert.ok(fishermanNotifications.data.some(item => item.type === 'new_auction_bid' && item.auction === 'auction-auto'));
 });
 
 test('ten buyers can submit concurrent bids without corrupting price or history', async () => {
@@ -315,4 +321,170 @@ test('settlement selects one winner and payment failure does not mark its order 
   assert.equal(failedOrder.paymentStatus, 'failed');
   assert.equal(failedOrder.orderStatus, 'payment-failed');
   assert.notEqual(failedOrder.paymentStatus, 'paid');
+});
+
+test('automatic bidding can be capped by a buyer-private total budget', async () => {
+  const buyerToken = await tokenFor(3);
+  const tooSmall = await api('/auctions/auction-mobile/automatic-bidding', {
+    token: buyerToken,
+    method: 'POST',
+    body: { totalBudget: 5000, requestId: 'budget-too-small-001' }
+  });
+  assert.equal(tooSmall.response.status, 400);
+
+  const activated = await api('/auctions/auction-mobile/automatic-bidding', {
+    token: buyerToken,
+    method: 'POST',
+    body: { totalBudget: 8000, requestId: 'budget-activate-001' }
+  });
+  assert.equal(activated.response.status, 201);
+  assert.ok(activated.data.bid.amount * 12 <= 8000);
+  assert.equal(activated.data.auction.autoBids, undefined);
+  assert.deepEqual((await api('/auctions/auction-mobile/automatic-bidding', { token: buyerToken })).data, {
+    enabled: true,
+    maxAmount: 666.66,
+    totalBudget: 8000
+  });
+  assert.equal((await api('/auctions/auction-mobile/automatic-bidding', { token: await tokenFor(4) })).data.enabled, false);
+});
+
+test('auction insights are authenticated, use preliminary history honestly and include existing market estimates', async () => {
+  const before = await api('/auctions/auction-voice');
+  const insight = await api('/auctions/auction-voice/insights', { token: await tokenFor(1) });
+  assert.equal(insight.response.status, 200);
+  assert.equal(insight.data.confidence, 'low');
+  assert.equal(insight.data.verifiedHistoricalAuctionCount, 0);
+  assert.equal(insight.data.priceEstimate.reliability, 'preliminary');
+  assert.equal(insight.data.demand.dataAvailability, 'insufficient_data');
+  assert.equal(JSON.stringify(insight.data).includes('autoBids'), false);
+  assert.equal((await api('/auctions/auction-voice/insights')).response.status, 401);
+  const after = await api('/auctions/auction-voice');
+  assert.equal(after.data.auction.currentPrice, before.data.auction.currentPrice);
+  assert.equal(after.data.bids.length, before.data.bids.length);
+
+  const fisherman = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'fisherman@auction.test', password: 'auction-test-password' }
+  });
+  assert.equal((await api('/auctions/auction-voice/insights', { token: fisherman.data.token })).response.status, 403);
+});
+
+test('auction chat validates messages, limits rate, and supports report moderation', async () => {
+  const buyerOne = await tokenFor(5);
+  const sent = await api('/auctions/auction-web/chat', {
+    token: buyerOne,
+    method: 'POST',
+    body: { content: 'Is this catch available for pickup today?' }
+  });
+  assert.equal(sent.response.status, 201);
+  assert.equal(sent.data.authorName, 'Test Buyer 5');
+  assert.equal(sent.data.author, undefined);
+  assert.equal((await api('/auctions/auction-web/chat', { token: buyerOne })).data[0].content, sent.data.content);
+
+  const phone = await api('/auctions/auction-web/chat', {
+    token: await tokenFor(6),
+    method: 'POST',
+    body: { content: 'Call me at 9876543210' }
+  });
+  assert.equal(phone.response.status, 400);
+  const fastRepeat = await api('/auctions/auction-web/chat', {
+    token: buyerOne,
+    method: 'POST',
+    body: { content: 'A second message too soon' }
+  });
+  assert.equal(fastRepeat.response.status, 429);
+
+  const report = await api(`/auctions/auction-web/chat/${sent.data.id}/report`, {
+    token: await tokenFor(6),
+    method: 'POST',
+    body: { reason: 'Please review this message' }
+  });
+  assert.equal(report.response.status, 201);
+  const adminLogin = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'tide@gmail.com', password: 'Tide@123' }
+  });
+  const reports = await api('/admin/auction-chat/reports', { token: adminLogin.data.token });
+  assert.ok(reports.data.some(item => item.message?.id === sent.data.id));
+  const moderated = await api(`/admin/auction-chat/${sent.data.id}/moderation`, {
+    token: adminLogin.data.token,
+    method: 'PATCH',
+    body: { status: 'hidden', moderationNote: 'Test moderation' }
+  });
+  assert.equal(moderated.response.status, 200);
+  assert.deepEqual((await api('/auctions/auction-web/chat', { token: await tokenFor(7) })).data, []);
+
+  const listingFisherman = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'fisherman@auction.test', password: 'auction-test-password' }
+  });
+  assert.equal((await api('/auctions/auction-web/chat', { token: listingFisherman.data.token })).response.status, 200);
+  const fishermanMessage = await api('/auctions/auction-web/chat', {
+    token: listingFisherman.data.token,
+    method: 'POST',
+    body: { content: 'This catch is ready for pickup today.' }
+  });
+  assert.equal(fishermanMessage.response.status, 201);
+
+  const unrelatedFisherman = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'other-fisherman@auction.test', password: 'auction-test-password' }
+  });
+  assert.equal((await api('/auctions/auction-web/chat', { token: unrelatedFisherman.data.token })).response.status, 403);
+  assert.equal((await api('/auctions/auction-web/chat', {
+    token: unrelatedFisherman.data.token,
+    method: 'POST',
+    body: { content: 'I do not own this catch.' }
+  })).response.status, 403);
+});
+
+test('auction analytics are admin-only, filterable, and do not expose bidder IDs', async () => {
+  const buyer = await tokenFor(8);
+  assert.equal((await api('/admin/auction-analytics', { token: buyer })).response.status, 403);
+  const adminLogin = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'tide@gmail.com', password: 'Tide@123' }
+  });
+  const analytics = await api('/admin/auction-analytics?fishType=Tuna', { token: adminLogin.data.token });
+  assert.equal(analytics.response.status, 200);
+  assert.ok(analytics.data.summary.totalAuctions > 0);
+  assert.ok(analytics.data.bySpecies.every(item => item.fishType === 'Tuna'));
+  assert.equal(JSON.stringify(analytics.data).includes('buyer-'), false);
+  assert.equal((await api('/admin/auction-analytics?from=bad-date', { token: adminLogin.data.token })).response.status, 400);
+  assert.equal((await api('/admin/auction-analytics?category=unlisted', { token: adminLogin.data.token })).response.status, 400);
+});
+
+test('only admins may remove a listing, and removing an active auction closes it', async () => {
+  const listingId = 'listing-auction-notifications';
+  const buyerToken = await tokenFor(9);
+  const adminLogin = await api('/auth/login', {
+    method: 'POST',
+    body: { email: 'tide@gmail.com', password: 'Tide@123' }
+  });
+
+  const forbidden = await api(`/admin/listings/${listingId}`, {
+    token: buyerToken,
+    method: 'DELETE'
+  });
+  assert.equal(forbidden.response.status, 403);
+  const before = await api('/admin/listings', { token: adminLogin.data.token });
+  assert.equal(before.data.find(item => item.id === listingId).status, 'auction');
+
+  const removed = await api(`/admin/listings/${listingId}`, {
+    token: adminLogin.data.token,
+    method: 'DELETE'
+  });
+  assert.equal(removed.response.status, 200);
+  assert.equal(removed.data.listing.status, 'removed');
+  assert.equal(removed.data.listing.removedBy, adminLogin.data.user.id);
+  const after = await api('/admin/listings', { token: adminLogin.data.token });
+  const updatedListing = after.data.find(item => item.id === listingId);
+  assert.equal(updatedListing.status, 'removed');
+  assert.equal(updatedListing.auction.status, 'cancelled');
+  assert.equal(updatedListing.auction.cancelledBy, adminLogin.data.user.id);
+  assert.equal((await api('/listings')).data.some(item => item.id === listingId), false);
+  assert.equal((await api(`/admin/listings/${listingId}`, {
+    token: adminLogin.data.token,
+    method: 'DELETE'
+  })).response.status, 404);
 });

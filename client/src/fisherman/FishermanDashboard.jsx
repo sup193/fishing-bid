@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, CheckCircle2, ClipboardList, Clock3, Fish, Gavel, ImagePlus, PackageCheck, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
+import { Activity, CheckCircle2, ClipboardList, Clock3, Fish, Gavel, ImagePlus, MessageCircle, PackageCheck, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
 import { api } from '../api.js';
 import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
@@ -7,11 +7,12 @@ import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import VoiceAssistant from '../voice/VoiceAssistant.jsx';
 import ReputationPanel from '../ReputationPanel.jsx';
 import { PricePredictionSummary } from '../PricePredictionTool.jsx';
+import DemandForecastPanel from '../DemandForecastPanel.jsx';
 
 const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
 export default function FishermanDashboard({ user, onUserUpdate, initialView = 'inventory', onViewChange }) {
-  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null);
+  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null); const [chatAuction, setChatAuction] = useState(null);
   useEffect(() => setView(initialView), [initialView]);
   const loadListings = () => api.fishermanListings().then(setListings).catch(err => setError(err.message));
   const loadSales = () => api.fishermanSales().then(setSales).catch(err => setError(err.message));
@@ -23,6 +24,16 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
     const refresh = setInterval(() => { loadListings(); loadSales(); }, 30_000);
     return () => clearInterval(refresh);
   }, []);
+  useEffect(() => {
+    if (!chatAuction?.id) return undefined;
+    let active = true;
+    const refresh = () => api.auctionChat(chatAuction.id)
+      .then(messages => { if (active) setChatAuction(current => current?.id === chatAuction.id ? { ...current, messages } : current); })
+      .catch(chatError => { if (active) setError(chatError.message); });
+    refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [chatAuction?.id]);
   const activeAuctions = listings.filter(item => item.saleMode === 'bid' && item.auction?.status === 'active').length;
   const saleListings = listings.filter(item => item.saleMode !== 'bid');
   const biddingListings = listings.filter(item => item.saleMode === 'bid');
@@ -114,11 +125,13 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
       <button className={view === 'orders' ? 'active' : ''} onClick={() => { setView('orders'); onViewChange?.('orders'); loadSales(); }}><ClipboardList size={17} /> Buyer orders <b>{sales.length}</b></button>
       <button className={view === 'sales' ? 'active' : ''} onClick={() => { setView('sales'); onViewChange?.('sales'); loadSales(); }}><ShoppingBag size={17} /> Selling data <b>{sales.filter(order => order.paymentStatus === 'paid' || ['processing', 'completed', 'delivered'].includes(order.orderStatus)).length}</b></button>
       <button className={view === 'reputation' ? 'active' : ''} onClick={() => { setView('reputation'); onViewChange?.('reputation'); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); }}><CheckCircle2 size={17} /> Reputation</button>
+      <button className={view === 'demand' ? 'active' : ''} onClick={() => { setView('demand'); onViewChange?.('demand'); }}><Activity size={17} /> Demand insights</button>
       <button className={view === 'bids' ? 'active' : ''} onClick={() => { setView('bids'); onViewChange?.('bids'); }}><Gavel size={17} /> Bid history</button>
       <button className={view === 'transactions' ? 'active' : ''} onClick={() => { setView('transactions'); onViewChange?.('transactions'); }}><ClipboardList size={17} /> Transactions</button>
     </nav>
     {view === 'transactions' && <TransactionHistory title="Fisherman transaction history" />}
     {view === 'reputation' && <ReputationPanel reputation={reputation} />}
+    {view === 'demand' && <DemandForecastPanel role="fisherman" />}
     {view === 'bids' && <BidMonitoring title="Auction bid history & review" />}
     {view === 'orders' && <OrdersPage orders={sales} onStatus={progressOrder} onSchedule={scheduleDelivery} />}
     {view === 'sales' && <SalesPage orders={sales} />}
@@ -140,17 +153,20 @@ export default function FishermanDashboard({ user, onUserUpdate, initialView = '
         </section>
         <section className="catch-list inventory-bid-list">
           <div className="panel-title"><div className="inventory-list-heading"><span className="inventory-list-icon"><Gavel size={17} /></span><span><p className="kicker">AUCTIONS</p><h2>Bidding listings</h2></span></div><span className="inventory-list-count">{biddingListings.length} {biddingListings.length === 1 ? 'catch' : 'catches'}</span></div>
-          {biddingListings.map(item => <CatchRow key={item.id} item={item} onClose={closeBid} onDelete={deleteListing} />)}
+          {biddingListings.map(item => <CatchRow key={item.id} item={item} onClose={closeBid} onDelete={deleteListing} onChat={item.auction ? setChatAuction : undefined} />)}
           {!biddingListings.length && <p className="empty inventory-empty">No bidding catches yet. Choose Start an auction to create one.</p>}
         </section>
       </div>
     </>}
+    {chatAuction && <FishermanAuctionChat auction={chatAuction} onClose={() => setChatAuction(null)} onUpdated={messages => setChatAuction(current => current ? { ...current, messages } : current)} />}
   </main>;
 }
 
 function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSubmit, onBack }) {
   const [prediction, setPrediction] = useState(null);
   const [predictionError, setPredictionError] = useState('');
+  const [demand, setDemand] = useState(null);
+  const [demandError, setDemandError] = useState(null);
   const sampleImage = sampleImageForFishType(form.fishType);
   const usingSampleImage = Boolean(sampleImage && form.imageUrl === sampleImage);
   useEffect(() => {
@@ -181,9 +197,30 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
     }, 350);
     return () => { active = false; window.clearTimeout(timer); };
   }, [form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
+  useEffect(() => {
+    if (!form.fishType) return undefined;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api.demandForecast({ fishType: form.fishType }).then(value => {
+        if (active) {
+          const insight = value.species?.[0] || null;
+          setDemand(insight);
+          setDemandError({ fishType: form.fishType, message: insight ? '' : 'No verified historical sales for this species or location.' });
+        }
+      }).catch(error => {
+        if (active) {
+          setDemand(null);
+          setDemandError({ fishType: form.fishType, message: error.message });
+        }
+      });
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [form.fishType]);
   const selectedPrice = Number(mode === 'bid' ? form.expectedPrice : form.salePrice);
   const predictionLow = Number(prediction?.minimumPerKg);
   const predictionHigh = Number(prediction?.maximumPerKg);
+  const currentDemand = demand?.fishType === form.fishType ? demand : null;
+  const currentDemandError = demandError?.fishType === form.fishType ? demandError.message : '';
   const priceOutOfRange = selectedPrice > 0 && predictionLow > 0
     && (selectedPrice < predictionLow * 0.8 || selectedPrice > predictionHigh * 1.2);
   return <section className={`panel listing-page listing-page-${mode}`}>
@@ -219,6 +256,8 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
         </div>
         {predictionError && <p className="notice" role="status">Price estimate unavailable: {predictionError}</p>}
         {prediction && <PricePredictionSummary prediction={prediction} compact />}
+        {currentDemandError && <p className="notice" role="status">Demand insight unavailable: {currentDemandError}</p>}
+        {currentDemand && <div className="demand-listing-advisory"><strong>Verified demand · {currentDemand.forecast?.next7Days?.demandCategory || 'Insufficient data'}</strong><span>Next 7 days: {currentDemand.forecast?.next7Days?.expectedQuantityKg === null ? 'unavailable' : `${Number(currentDemand.forecast?.next7Days?.expectedQuantityKg).toLocaleString()} kg`} · {currentDemand.trend?.direction || 'Insufficient data'} trend</span><small>Market demand is advisory and will not change your chosen price or quantity.</small></div>}
         {priceOutOfRange && <p className="price-warning" role="status">Your selected price is more than 20% outside this indicative range. This is only a warning; your chosen price will not be changed.</p>}
         {mode === 'bid' && <fieldset className="listing-auction-settings">
           <legend>Auction settings</legend>
@@ -233,7 +272,7 @@ function ListingForm({ mode, form, meta, imageUploading, onChange, onImage, onSu
     </form>
   </section>;
 }
-function CatchRow({ item, onClose, onDelete, onEdit }) {
+function CatchRow({ item, onClose, onDelete, onEdit, onChat }) {
   const auction = item.auction;
   const image = sampleImageFor(item);
   const low = Number(item.predictedLow);
@@ -255,10 +294,49 @@ function CatchRow({ item, onClose, onDelete, onEdit }) {
     <div className="catch-side">
       <strong>₹{item.saleMode === 'bid' ? auction?.currentPrice || item.expectedPrice : item.salePrice || item.expectedPrice}<small>/kg</small></strong>
       {canClose && <button className="button small dark" onClick={() => onClose(auction.id)}>Stop bidding</button>}
+      {auction && onChat && <button className="button small secondary" onClick={() => onChat({ id: auction.id, fishType: item.fishType, status: auction.status, endTime: auction.endTime, messages: [] })}><MessageCircle size={14} /> Chat</button>}
       {item.saleMode !== 'bid' && item.status === 'available' && <button className="button small secondary" onClick={() => onEdit(item)}>Edit listing</button>}
       {canDelete && <button className="icon-button danger" title="Delete listing" onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}
     </div>
   </article>;
+}
+
+function FishermanAuctionChat({ auction, onClose, onUpdated }) {
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const submit = async event => {
+    event.preventDefault();
+    if (!draft.trim()) return;
+    setSending(true);
+    try {
+      const sent = await api.sendAuctionChat(auction.id, draft);
+      onUpdated([...(auction.messages || []), sent].slice(-100));
+      setDraft('');
+      setChatError('');
+    } catch (error) {
+      setChatError(error.message);
+    } finally {
+      setSending(false);
+    }
+  };
+  return <div className="modal-backdrop" onClick={onClose}>
+    <section className="modal auction-chat-modal" aria-label={`${auction.fishType} auction chat`} onClick={event => event.stopPropagation()}>
+      <button className="close" type="button" onClick={onClose}>×</button>
+      <p className="kicker">BUYER CONVERSATION</p><h2>{auction.fishType} auction chat</h2>
+      <p>Answer buyer questions about the catch. Contact details are blocked to keep communication on-platform.</p>
+      {chatError && <p className="notice" role="alert">{chatError}</p>}
+      <div className="auction-chat-messages">
+        {(auction.messages || []).slice(-30).map(chat => <article className="auction-chat-message" key={chat.id}><div><strong>{chat.authorName}</strong><small>{new Date(chat.createdAt).toLocaleString()}</small></div><p>{chat.content}</p></article>)}
+        {!auction.messages?.length && <p className="empty">No buyer questions yet.</p>}
+      </div>
+      {!['completed', 'cancelled'].includes(auction.status) && <form className="auction-chat-form" onSubmit={submit}>
+        <input aria-label="Reply to auction chat" value={draft} maxLength={500} onChange={event => setDraft(event.target.value)} placeholder="Reply to buyers…" />
+        <button className="button primary" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+      </form>}
+      <small>Chat refreshes automatically while open. Messages are visible to signed-in buyers viewing this auction.</small>
+    </section>
+  </div>;
 }
 
 function ListingEditor({ listing, onClose, onSave }) {

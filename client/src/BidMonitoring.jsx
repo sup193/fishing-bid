@@ -40,6 +40,7 @@ export default function BidMonitoring({ title = 'Bid history & review' }) {
           ? <span className="bid-winner"><Trophy size={15} /><span>Winner: {auction.winnerName || 'Buyer'}<strong>{money(auction.winningBid)}/kg</strong></span></span>
           : <span className="bid-auction-end"><Clock3 size={14} /><span>Ends<strong>{date(auction.endTime)}</strong></span></span>}
       </div>
+      {auction.activity?.reviewNeeded && <p className="bid-auction-review"><AlertTriangle size={14} /> Auction-level signal: {auction.activity.flags.map(flag => flag.detail).join(' · ')}</p>}
       {auction.bids.length === 0
         ? <p className="empty bid-monitor-empty"><Gavel size={15} /> No bids recorded yet.</p>
         : auction.bids.map(bid => <article className={`bid-monitor-row${bid.riskReviewNeeded ? ' needs-review' : ''}`} key={bid.id}>
@@ -55,6 +56,6 @@ export default function BidMonitoring({ title = 'Bid history & review' }) {
           </div>}
         </article>)}
     </section>)}
-    {!error && auctions.length > 0 && <p className="bid-monitor-footnote"><Gavel size={14} /> Risk signals: 5+ bids by one buyer within 60 seconds, or a bid at least twice and five minimum increments above the previous high.</p>}
+    {!error && auctions.length > 0 && <p className="bid-monitor-footnote"><Gavel size={14} /> Signals include rapid bidding, unusually large bid jumps, and high bid concentration. They are advisory review prompts only.</p>}
   </section>;
 }

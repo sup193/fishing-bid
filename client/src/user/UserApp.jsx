@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
+import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
 import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
@@ -7,10 +7,11 @@ import BuyerHistory from './BuyerHistory.jsx';
 import VoiceAssistant from '../voice/VoiceAssistant.jsx';
 import { filterVoiceListings } from '../../../shared/voice/actions.js';
 import PricePredictionTool, { PricePredictionSummary } from '../PricePredictionTool.jsx';
+import DemandForecastPanel from '../DemandForecastPanel.jsx';
 
 const viewFromHash = () => {
   const hash = window.location.hash.slice(1);
-  return ['history', 'transactions', 'prices'].includes(hash) ? hash : 'market';
+  return ['history', 'transactions', 'prices', 'demand'].includes(hash) ? hash : 'market';
 };
 
 const fallback = [
@@ -249,7 +250,14 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
   const [messageType, setMessageType] = useState('success');
   const [bidAmount, setBidAmount] = useState('');
   const [automaticMax, setAutomaticMax] = useState('');
+  const [automaticBudget, setAutomaticBudget] = useState('');
   const [automaticEnabled, setAutomaticEnabled] = useState(false);
+  const [auctionInsights, setAuctionInsights] = useState(null);
+  const [auctionInsightError, setAuctionInsightError] = useState('');
+  const [auctionChat, setAuctionChat] = useState([]);
+  const [auctionChatDraft, setAuctionChatDraft] = useState('');
+  const [auctionChatError, setAuctionChatError] = useState('');
+  const [auctionChatSending, setAuctionChatSending] = useState(false);
   const [bidLoading, setBidLoading] = useState(false);
   const [automaticLoading, setAutomaticLoading] = useState(false);
   const [liveAuctionError, setLiveAuctionError] = useState('');
@@ -278,6 +286,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
   const [recommendationWishlistOnly, setRecommendationWishlistOnly] = useState(false);
   const [listingError, setListingError] = useState('');
   const [voiceSearch, setVoiceSearch] = useState(null);
+  const [demandFishType, setDemandFishType] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -360,6 +369,10 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       setLiveAuctionError('');
       setAutomaticEnabled(false);
       setAutomaticMax('');
+      setAutomaticBudget('');
+      setAuctionInsights(null);
+      setAuctionChat([]);
+      setAuctionChatDraft('');
       return undefined;
     }
     let active = true;
@@ -373,11 +386,6 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
           bids: detail.bids,
           activeBidderCount: detail.activeBidderCount
         };
-        if (detail.auction.minimumBid) {
-          setBidAmount(current => !current || Number(current) < detail.auction.minimumBid
-            ? String(detail.auction.minimumBid)
-            : current);
-        }
         setSelected(current => current?.auction?.id === selectedAuctionId ? updated : current);
         setItems(current => current.map(item => item.id === updated.id ? updated : item));
         setLiveAuctionError('');
@@ -401,12 +409,42 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
         if (!active) return;
         setAutomaticEnabled(result.enabled);
         setAutomaticMax(result.maxAmount ? String(result.maxAmount) : '');
+        setAutomaticBudget(result.totalBudget ? String(result.totalBudget) : '');
       })
       .catch(error => {
         if (active) setLiveAuctionError(error.message);
       });
     return () => { active = false; };
   }, [selectedAuctionId, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!selectedAuctionId || user?.role !== 'buyer') {
+      setAuctionInsights(null);
+      setAuctionInsightError('');
+      setAuctionChat([]);
+      return undefined;
+    }
+    let active = true;
+    api.auctionInsights(selectedAuctionId)
+      .then(insights => { if (active) setAuctionInsights(insights); })
+      .catch(error => { if (active) setAuctionInsightError(error.message); });
+    const refreshChat = async () => {
+      try {
+        const chat = await api.auctionChat(selectedAuctionId);
+        if (!active) return;
+        setAuctionChat(chat);
+        setAuctionChatError('');
+      } catch (error) {
+        if (active) setAuctionChatError(error.message);
+      }
+    };
+    refreshChat();
+    const interval = window.setInterval(refreshChat, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [selectedAuctionId, user?.role]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setTrendRefresh(value => value + 1), 30000);
@@ -433,7 +471,8 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
   const visible = items.filter(item => {
     const category = categories.find(option => option.name === selectedCategory);
     return (selectedCategory === 'All' || category?.matches(item))
-      && (!voiceSearch || filterVoiceListings([item], voiceSearch).length > 0);
+      && (!voiceSearch || filterVoiceListings([item], voiceSearch).length > 0)
+      && (!demandFishType || item.fishType === demandFishType);
   }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const guestPreviewItems = visible.slice(0, 3);
   const activeAuctions = items.filter(item => item.saleMode === 'bid' && item.auction?.status !== 'completed' && (!item.auction?.endTime || new Date(item.auction.endTime).getTime() > now)).length;
@@ -473,9 +512,22 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
     localStorage.setItem(wishlistStorageKey, JSON.stringify(next));
     return next;
   });
+  const resetAuctionContext = () => {
+    setAuctionInsights(null);
+    setAuctionInsightError('');
+    setAuctionChat([]);
+    setAuctionChatDraft('');
+    setAuctionChatError('');
+  };
+  const openListing = listing => {
+    setSelected(listing);
+    setMessage('');
+    setBidAmount('');
+    resetAuctionContext();
+  };
   const beginBid = item => {
     if (!user) return onAuth('login');
-    setSelected(item);
+    openListing(item);
     setBidAmount(String(itemPrice(item) + Number(item.auction?.minimumIncrement || 1)));
     setMessage('');
   };
@@ -504,12 +556,16 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
     if (!user) return onAuth('login');
     setAutomaticLoading(true);
     try {
-      const amount = Number(automaticMax);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid maximum bid amount.');
+      const amount = automaticMax ? Number(automaticMax) : null;
+      const budget = automaticBudget ? Number(automaticBudget) : null;
+      if ((!Number.isFinite(amount) || amount <= 0) && (!Number.isFinite(budget) || budget <= 0)) {
+        throw new Error('Enter a maximum bid per kg or a total budget.');
+      }
       await api.automaticBidding(
         selected.auction.id,
         amount,
-        `auto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        `auto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        budget
       );
       setAutomaticEnabled(true);
       setMessageType('success');
@@ -520,6 +576,22 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       setMessage(error.message);
     } finally {
       setAutomaticLoading(false);
+    }
+  };
+
+  const sendAuctionMessage = async event => {
+    event.preventDefault();
+    if (!selectedAuctionId || !auctionChatDraft.trim()) return;
+    setAuctionChatSending(true);
+    try {
+      const sent = await api.sendAuctionChat(selectedAuctionId, auctionChatDraft);
+      setAuctionChat(current => [...current, sent].slice(-100));
+      setAuctionChatDraft('');
+      setAuctionChatError('');
+    } catch (error) {
+      setAuctionChatError(error.message);
+    } finally {
+      setAuctionChatSending(false);
     }
   };
 
@@ -669,6 +741,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
       </section>
       <nav className="buyer-dashboard-nav" aria-label="Buyer dashboard">
         <a className={currentView === 'market' ? 'active' : ''} href="#market"><Search size={17} /> Marketplace</a>
+        <a className={currentView === 'demand' ? 'active' : ''} href="#demand"><Activity size={17} /> Demand insights</a>
         <a className={currentView === 'prices' ? 'active' : ''} href="#prices"><BarChart3 size={17} /> Price estimate</a>
         <a className={currentView === 'history' ? 'active' : ''} href="#history"><History size={17} /> Bids &amp; orders</a>
         <a className={currentView === 'transactions' ? 'active' : ''} href="#transactions"><ReceiptText size={17} /> Transactions</a>
@@ -678,7 +751,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
         {notificationError && <p className="notice" role="alert">{notificationError}</p>}
         {notifications.slice(0, 4).map(notification => <article className={`buyer-notification${notification.read ? ' is-read' : ''}`} key={notification.id}>
           <div><strong>{notification.title}</strong><p>{notification.message}</p><small>{new Date(notification.createdAt).toLocaleString()}</small></div>
-          {!notification.read && <button type="button" onClick={() => markNotificationRead(notification)} aria-label={`Mark ${notification.title} as read`}>Mark read</button>}
+          {!notification.read && <button type="button" onClick={() => markNotificationRead(notification)} aria-label={`Mark read: ${notification.title}`}>Mark read</button>}
         </article>)}
       </section>}
     </>}
@@ -768,7 +841,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
           {!buyerHistoryLoading && !buyerHistoryError && recommendedItems.length > 0 && <div className="recommendation-grid">
             {recommendedItems.map(({ item, historyMatches }) => <article className="recommendation-card" key={item.id}>
               <p>{historyMatches ? `Similar to seafood in your history (${historyMatches} ${historyMatches === 1 ? 'activity' : 'activities'})` : 'Matches your seafood preference and budget'}</p>
-              <FishCard item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />
+              <FishCard item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />
             </article>)}
           </div>}
           {!buyerHistoryLoading && !buyerHistoryError && recommendedItems.length === 0 && <p className="empty recommendation-message">No available catches match these preferences. Try another category or a higher budget.</p>}
@@ -777,9 +850,10 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
         {message && !selected && <p className={messageType === 'error' ? 'notice' : 'success-notice'}>{message}</p>}
         <section className="market-listing-section" aria-labelledby="fresh-catch-title">
           <div className="market-section-title"><div><p className="kicker">MARKET LISTINGS</p><h2 id="fresh-catch-title">Available Catch</h2></div><span>{freshCatchItems.length} available</span></div>
+          {demandFishType && <p className="demand-filter-notice">Showing {demandFishType} from demand insights. <button type="button" onClick={() => setDemandFishType('')}>Clear filter</button></p>}
           <p className="market-section-description">Fixed-price catches and completed auction listings from local fishermen. Quality grades are seller-reported.</p>
           <div className="fish-grid">
-            {loading ? <p className="empty">Scanning the morning catch...</p> : freshCatchItems.map(item => <FishCard key={item.id} item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+            {loading ? <p className="empty">Scanning the morning catch...</p> : freshCatchItems.map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
             {!loading && !freshCatchItems.length && <p className="empty buyer-no-results">No fresh catches are available in this category right now.</p>}
           </div>
         </section>
@@ -787,7 +861,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
           <div className="market-section-title"><div><p className="kicker">BID BEFORE THEY'RE GONE</p><h2 id="live-auctions-title">Live Auctions</h2></div><span>{liveAuctionItems.length} live</span></div>
           <p className="market-section-description">Follow current bids and place an offer before each auction closes.</p>
           <div className="fish-grid">
-            {liveAuctionItems.map(item => <FishCard key={item.id} item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+            {liveAuctionItems.map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
             {!liveAuctionItems.length && <p className="empty buyer-no-results">No live auctions are available in this category right now.</p>}
           </div>
         </section>
@@ -820,7 +894,7 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
           </div>
           <p className="market-section-description">See what local fishermen are bringing in. Log in to browse every catch, compare prices, and join live auctions.</p>
           <div className="fish-grid guest-preview-grid">
-            {loading ? <p className="empty">Loading featured catches…</p> : guestPreviewItems.map(item => <FishCard key={item.id} item={item} onSelect={listing => { setSelected(listing); setMessage(''); setBidAmount(''); }} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+            {loading ? <p className="empty">Loading featured catches…</p> : guestPreviewItems.map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
             {!loading && !guestPreviewItems.length && <p className="empty buyer-no-results">New catches will appear here as local fishermen publish listings.</p>}
           </div>
         </section>
@@ -849,6 +923,15 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
     {buyerView && currentView === 'prices' && <main className="buyer-view" id="prices">
       <div className="buyer-page-heading"><div><p className="kicker">MARKET GUIDANCE</p><h2>Fish price estimate</h2><p>Compare a transparent estimate and verified sale history when available.</p></div><BarChart3 size={23} /></div>
       <PricePredictionTool />
+    </main>}
+    {buyerView && currentView === 'demand' && <main className="buyer-view" id="demand">
+      <DemandForecastPanel role="buyer" listings={items} onExploreFish={fishType => {
+        setDemandFishType(fishType);
+        setSelectedCategory('All');
+        setVoiceSearch(null);
+        window.location.hash = '#market';
+        window.requestAnimationFrame(() => document.querySelector('#fresh-catch-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }} />
     </main>}
     {showBiddingGuide && <div className="modal-backdrop bidding-guide-backdrop" onClick={() => setShowBiddingGuide(false)}>
       <section className="modal bidding-guide-modal" role="dialog" aria-modal="true" aria-labelledby="market-bidding-title" onClick={event => event.stopPropagation()}>
@@ -898,6 +981,22 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
           {Date.parse(selected.auction?.endTime) - now <= 5 * 60_000 && Date.parse(selected.auction?.endTime) > now
             && <p className="auction-closing-note"><Clock3 size={15} /> Closing soon. A valid bid in the final 30 seconds extends the auction by 30 seconds.</p>}
           {liveAuctionError && <p className="notice" role="alert">Live auction update unavailable: {liveAuctionError}</p>}
+          {user?.role === 'buyer' && <section className="auction-ai-guide" aria-label="Auction guidance">
+            <div className="auction-panel-heading"><h3><Sparkles size={16} /> Smart auction guide</h3><span>{auctionInsights?.confidence || 'Loading'}</span></div>
+            {auctionInsightError && <p className="notice" role="alert">{auctionInsightError}</p>}
+            {auctionInsights ? <>
+              <p>Suggested next bid: <strong>₹{Number(auctionInsights.suggestedBidPerKg).toLocaleString()}/kg</strong>
+                <button className="button small secondary" type="button" onClick={() => setBidAmount(String(auctionInsights.suggestedBidPerKg))}>Use suggestion</button>
+              </p>
+              <p>Estimated final range: <strong>₹{Number(auctionInsights.estimatedFinalPricePerKg.minimumPerKg).toLocaleString()}–₹{Number(auctionInsights.estimatedFinalPricePerKg.maximumPerKg).toLocaleString()}/kg</strong></p>
+              <small>{auctionInsights.verifiedHistoricalAuctionCount
+                ? `${auctionInsights.verifiedHistoricalAuctionCount} verified paid auction sales inform the estimate.`
+                : 'No sufficient verified auction history; this range is a low-confidence bid-activity baseline.'}</small>
+              {auctionInsights.priceEstimate && <small>Existing fish-price estimate: ₹{Number(auctionInsights.priceEstimate.minimumPerKg).toLocaleString()}–₹{Number(auctionInsights.priceEstimate.maximumPerKg).toLocaleString()}/kg ({auctionInsights.priceEstimate.reliability}).</small>}
+              {auctionInsights.demand?.trend && <small>Demand outlook: {auctionInsights.demand.trend.direction} · {auctionInsights.demand.next7Days?.expectedQuantityKg ?? '—'} kg next 7 days, when available.</small>}
+              <small>{auctionInsights.disclaimer}</small>
+            </> : !auctionInsightError && <p className="form-hint">Loading market-based guidance…</p>}
+          </section>}
           <section className="auction-bid-history" aria-label="Complete bid history">
             <div className="auction-panel-heading"><h3>Bid history</h3><span>{selected.bids?.length || 0} bids</span></div>
             {selected.bids?.length
@@ -908,6 +1007,26 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
               </article>)}</div>
               : <p className="empty auction-empty">No bids yet. The starting price is ₹{Number(selected.auction?.startPrice || 0).toLocaleString()}/kg.</p>}
           </section>
+          {user?.role === 'buyer' && <section className="auction-chat" aria-label="Auction chat">
+            <div className="auction-panel-heading"><h3><MessageCircle size={16} /> Auction chat</h3><span>Visible to buyers and the fisherman</span></div>
+            {auctionChatError && <p className="notice" role="alert">{auctionChatError}</p>}
+            <div className="auction-chat-messages" aria-live="polite">
+              {auctionChat.slice(-12).map(chat => <article className="auction-chat-message" key={chat.id}>
+                <div><strong>{chat.authorName}</strong><small>{new Date(chat.createdAt).toLocaleTimeString()}</small></div>
+                <p>{chat.content}</p>
+                {!chat.isMine && <button type="button" onClick={async () => {
+                  try { await api.reportAuctionMessage(selectedAuctionId, chat.id, 'Buyer report'); setAuctionChatError('Message sent to admin for review.'); }
+                  catch (error) { setAuctionChatError(error.message); }
+                }}>Report</button>}
+              </article>)}
+              {!auctionChat.length && !auctionChatError && <p className="empty">Ask a question about this catch.</p>}
+            </div>
+            {!bidClosed && <form className="auction-chat-form" onSubmit={sendAuctionMessage}>
+              <input aria-label="Auction chat message" value={auctionChatDraft} maxLength={500} onChange={event => setAuctionChatDraft(event.target.value)} placeholder="Ask the fisherman a question…" />
+              <button className="button secondary" disabled={auctionChatSending || !auctionChatDraft.trim()}>{auctionChatSending ? 'Sending…' : 'Send'}</button>
+            </form>}
+            <small>Keep messages on-platform; sharing contact details is not allowed.</small>
+          </section>}
           {!bidClosed && user?.role === 'buyer' && <>
             <div className="auction-bid-form">
               <label htmlFor="manual-bid-amount">Manual bid (₹ per kg)</label>
@@ -921,8 +1040,11 @@ export default function UserApp({ user, onAuth, onUserUpdate }) {
               <p>We raise your bid only when needed and never above your private maximum.</p>
               <label htmlFor="automatic-bid-maximum">Your maximum bid (₹ per kg)</label>
               <input id="automatic-bid-maximum" type="number" min={selected.auction?.minimumBid || Number(selected.auction?.currentPrice || 0) + Number(selected.auction?.minimumIncrement || 1)} step="0.01" value={automaticMax} onChange={event => setAutomaticMax(event.target.value)} placeholder="Set your maximum" />
-              <button className="button secondary full" type="button" disabled={automaticLoading || !automaticMax} onClick={saveAutomaticBidding}>{automaticLoading ? 'Saving…' : automaticEnabled ? 'Update maximum bid' : 'Activate automatic bidding'}</button>
-              <small>Your limit is private and is never shown to other buyers.</small>
+              <label htmlFor="automatic-bid-budget">Optional total budget for this catch (₹)</label>
+              <input id="automatic-bid-budget" type="number" min="0.01" step="0.01" value={automaticBudget} onChange={event => setAutomaticBudget(event.target.value)} placeholder="Caps per-kg bids by quantity" />
+              {automaticBudget && selected.quantity ? <small>At {Number(selected.quantity).toLocaleString()} kg, your total spend cap limits bidding to about ₹{(Number(automaticBudget) / Number(selected.quantity)).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg.</small> : null}
+              <button className="button secondary full" type="button" disabled={automaticLoading || !(automaticMax || automaticBudget)} onClick={saveAutomaticBidding}>{automaticLoading ? 'Saving…' : automaticEnabled ? 'Update maximum bid' : 'Activate automatic bidding'}</button>
+              <small>Your limits are private and are never shown to other buyers. Automatic bids never exceed your per-kg maximum or total budget.</small>
             </section>
           </>}
           {!bidClosed && user?.role !== 'buyer' && <button className="button primary full" onClick={() => onAuth('login')}>Log in to place a bid</button>}

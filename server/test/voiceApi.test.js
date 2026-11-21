@@ -54,6 +54,27 @@ after(async () => {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('buyer registration validates name, email, and password before creating a pending request', async () => {
+  const shortPassword = await api('/auth/register', {
+    method: 'POST',
+    body: { name: 'New Buyer', email: 'new-buyer@example.test', password: 'short' }
+  });
+  assert.equal(shortPassword.response.status, 400);
+
+  const invalidEmail = await api('/auth/register', {
+    method: 'POST',
+    body: { name: 'New Buyer', email: 'not-an-email', password: 'StrongPass123!' }
+  });
+  assert.equal(invalidEmail.response.status, 400);
+
+  const valid = await api('/auth/register', {
+    method: 'POST',
+    body: { name: 'New Buyer', email: 'New-Buyer@example.test', password: 'StrongPass123!' }
+  });
+  assert.equal(valid.response.status, 202);
+  assert.equal(valid.data.status, 'pending');
+});
+
 test('language preference requires an authenticated user and only accepts supported language codes', async () => {
   const unauthenticated = await api('/auth/preferences', {
     method: 'PATCH',

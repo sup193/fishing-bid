@@ -40,10 +40,10 @@ export default function App() {
       <button className="mobile-menu" onClick={() => setMenu(!menu)} aria-label={menu ? 'Close navigation' : 'Open navigation'}>{menu ? <X /> : <Menu />}</button>
       <nav className={menu ? 'open' : ''}>
         {user?.role !== 'buyer' && user?.role !== 'admin' && user?.role !== 'fisherman' && <a href="#market" onClick={() => setMenu(false)}>Marketplace</a>}
-        {user?.role === 'buyer' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label="Open buyer profile"><UserRound size={15} /> {user.name}</button>}
-        {user?.role === 'admin' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label="Open admin profile"><UserRound size={15} /> {user.name}</button>}
+        {user?.role === 'buyer' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open buyer profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}
+        {user?.role === 'admin' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open admin profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}
         {user
-          ? <>{user.role === 'fisherman' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label="Open fisherman profile"><UserRound size={15} /> {user.name}</button>}{user.role !== 'buyer' && user.role !== 'fisherman' && user.role !== 'admin' && <span className="user-name"><UserRound size={15} /> {user.name}</span>}{user.role !== 'buyer' && user.role !== 'fisherman' && <button className="text-button" onClick={logout}>Log out</button>}</>
+          ? <>{user.role === 'fisherman' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open fisherman profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}{user.role !== 'buyer' && user.role !== 'fisherman' && user.role !== 'admin' && <span className="user-name"><UserRound size={15} /> {user.name}</span>}{user.role !== 'buyer' && user.role !== 'fisherman' && <button className="text-button" onClick={logout}>Log out</button>}</>
           : <><button className="button dark" onClick={() => setAuthMode('login')}><LogIn size={16} /> Log in</button><button className="text-button" onClick={() => setAuthMode('register')}>Sign up</button></>}
       </nav>
     </header>
@@ -130,6 +130,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit }) {
             onChange={change}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             required
+            minLength={mode === 'register' ? 8 : undefined}
           />
           <button
             className="password-toggle"

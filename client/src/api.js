@@ -1,4 +1,10 @@
 const API = '/api';
+const queryString = values => {
+  const search = new URLSearchParams(
+    Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+  return search.size ? `?${search}` : '';
+};
 
 export async function request(path, options = {}) {
   const token = localStorage.getItem('tide_token');
@@ -21,6 +27,11 @@ export const api = {
   uploadFishImage: file => { const form = new FormData(); form.append('image', file); return request('/uploads/image', { method: 'POST', body: form }); },
   listings: (params = '') => request(`/listings${params}`),
   marketTrends: (days = 7) => request(`/market/trends?days=${encodeURIComponent(days)}`),
+  demandForecast: (filters = {}) => request(`/demand/forecast${queryString(filters)}`),
+  buyerDemand: (filters = {}) => request(`/demand/buyer${queryString(filters)}`),
+  fishermanDemand: (filters = {}) => request(`/demand/fisherman${queryString(filters)}`),
+  adminDemandAnalytics: (filters = {}) => request(`/admin/demand/analytics${queryString(filters)}`),
+  adminDemandPerformance: () => request('/admin/demand/performance'),
   listing: id => request(`/listings/${id}`),
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   register: body => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
@@ -46,10 +57,17 @@ export const api = {
   adminPriceAnalytics: () => request('/admin/price-analytics'),
   evaluatePriceModel: () => request('/admin/price-model/evaluate', { method: 'POST', body: JSON.stringify({}) }),
   bidMonitoring: () => request('/bid-monitoring'),
+  adminAuctionAnalytics: filters => request(`/admin/auction-analytics${queryString(filters)}`),
+  adminAuctionChatReports: () => request('/admin/auction-chat/reports'),
+  moderateAuctionMessage: (id, body) => request(`/admin/auction-chat/${encodeURIComponent(id)}/moderation`, { method: 'PATCH', body: JSON.stringify(body) }),
   recommendations: () => request('/recommendations'),
   auction: id => request(`/auctions/${id}`),
+  auctionInsights: id => request(`/auctions/${encodeURIComponent(id)}/insights`),
+  auctionChat: id => request(`/auctions/${encodeURIComponent(id)}/chat`),
+  sendAuctionChat: (id, content) => request(`/auctions/${encodeURIComponent(id)}/chat`, { method: 'POST', body: JSON.stringify({ content }) }),
+  reportAuctionMessage: (id, messageId, reason) => request(`/auctions/${encodeURIComponent(id)}/chat/${encodeURIComponent(messageId)}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   bid: (id, amount, requestId) => request(`/auctions/${id}/bids`, { method: 'POST', body: JSON.stringify({ amount, requestId }) }),
-  automaticBidding: (id, maxAmount, requestId) => request(`/auctions/${id}/automatic-bidding`, { method: 'POST', body: JSON.stringify({ maxAmount, requestId }) }),
+  automaticBidding: (id, maxAmount, requestId, totalBudget) => request(`/auctions/${id}/automatic-bidding`, { method: 'POST', body: JSON.stringify({ ...(maxAmount ? { maxAmount } : {}), ...(totalBudget ? { totalBudget } : {}), requestId }) }),
   automaticBiddingStatus: id => request(`/auctions/${id}/automatic-bidding`),
   disableAutomaticBidding: id => request(`/auctions/${id}/automatic-bidding`, { method: 'DELETE' }),
   notifications: () => request('/notifications'),

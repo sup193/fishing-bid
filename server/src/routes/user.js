@@ -10,17 +10,19 @@ import { createHash, randomUUID } from 'node:crypto';
 import { SUPPORTED_LANGUAGES } from '../../../shared/voice/languages.js';
 import { get, insert, list, update, remove, reserveListing, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
+import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
 import { FISH_TYPES, QUALITIES, SIZES, assessBidRisk, predictPrice, refreshAuction } from '../utils.js';
 import { getFishermanReputation, getPublicReputationSummaries, isVerifiedPaidOrder, refreshFishermanReputation } from '../reputation.js';
 import { makePricePrediction, normalizePredictionInput } from '../pricePrediction.js';
+import { analyzeAuctionActivity, buildAuctionInsights } from '../auctionInsights.js';
 import { applyAuctionOffer, auctionBidderIds, minimumBidFor, publicAuction, recalculateAuctionOffers } from '../auctionBidding.js';
 import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
 
 const router = express.Router();
 const execFileAsync = promisify(execFile);
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../');
-const uploadDir = resolve(projectRoot, 'server/uploads');
+const uploadDir = resolve(process.env.TIDEMARKET_UPLOAD_DIR || resolve(projectRoot, 'server/uploads'));
 fs.mkdirSync(uploadDir, { recursive: true });
 const imageExtensions = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 const upload = multer({
@@ -94,6 +96,28 @@ const listingView = async (listing, reputation = undefined) => {
   };
 };
 
+async function demandSnapshot(req, { fisherman = false, buyer = false } = {}) {
+  const [orders, listings, auctions, bids] = await Promise.all([
+    list('orders'), list('listings'), list('auctions'), list('bids')
+  ]);
+  return buildDemandInsights({
+    orders,
+    listings,
+    auctions,
+    bids,
+    filters: {
+      from: req.query.from,
+      to: req.query.to,
+      fishType: req.query.fishType,
+      category: req.query.category,
+      location: req.query.location || req.user.location || ''
+    },
+    fishermanId: fisherman ? req.user.id : null,
+    buyerLocation: buyer ? req.user.location || '' : '',
+    now: Date.now()
+  });
+}
+
 function legacyAuctionState(auction, bids) {
   if (auction.bidHistory) return auction;
   const bidderOffers = {};
@@ -147,6 +171,14 @@ async function notifyBidParticipants({ auction, bid, previousBidder, actorId, le
       });
     }
   }
+  const listing = await get('listings', auction.listing);
+  if (listing?.fisherman && listing.fisherman !== actorId) {
+    messages.set(listing.fisherman, {
+      type: 'new_auction_bid',
+      title: 'New bid on your catch',
+      message: `A buyer placed a bid. The current price is now ₹${Number(auction.currentPrice).toLocaleString()}/kg.`
+    });
+  }
   if (auction.currentBidder) {
     messages.set(auction.currentBidder, {
       type: 'highest_bidder',
@@ -168,7 +200,7 @@ async function notifyBidParticipants({ auction, bid, previousBidder, actorId, le
   }
 }
 
-async function submitAuctionOffer({ auction, amount, buyerId, mode, requestId }) {
+async function submitAuctionOffer({ auction, amount, totalBudget, buyerId, mode, requestId }) {
   const legacyBids = where(await list('bids'), { auction: auction.id });
   const bidId = randomUUID();
   const now = Date.now();
@@ -182,6 +214,7 @@ async function submitAuctionOffer({ auction, amount, buyerId, mode, requestId })
     operation = applyAuctionOffer(legacyAuctionState(current, legacyBids), {
       buyerId,
       amount,
+      totalBudget,
       mode,
       bidId,
       requestId,
@@ -346,8 +379,32 @@ async function markPaymentPaid(transaction, payment) {
   return paidTransaction;
 }
 
-router.post('/auth/register', async (req, res) => { try { const { name, email, password, phone, location } = req.body; const normalizedEmail = email?.toLowerCase(); if (!name || !normalizedEmail || !password) return res.status(400).json({ message: 'Name, email and password are required' }); if ((await list('users')).some(user => user.email === normalizedEmail)) return res.status(400).json({ message: 'Email is already registered' }); const existingRequest = (await list('registrationRequests')).find(item => item.email === normalizedEmail && item.status === 'pending'); if (existingRequest) return res.status(409).json({ message: 'Your registration request is still pending admin approval.', status: 'pending' }); const request = { name, email: normalizedEmail, passwordHash: await bcrypt.hash(password, 12), role: 'buyer', status: 'pending' }; if (phone) request.phone = phone; if (location) request.location = location; await insert('registrationRequests', request); res.status(202).json({ status: 'pending', message: 'Registration submitted. An admin must approve your account before you can sign in.' }); } catch (error) { res.status(400).json({ message: error.message }); } });
-router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed', detail: error.message }); } });
+router.post('/auth/register', async (req, res) => {
+  try {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const normalizedEmail = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+      || password.length < 8 || password.length > 128) {
+      return res.status(400).json({ message: 'Use a valid name and email, and a password between 8 and 128 characters' });
+    }
+    if ((await list('users')).some(user => user.email === normalizedEmail)) {
+      return res.status(400).json({ message: 'Email is already registered' });
+    }
+    const existingRequest = (await list('registrationRequests')).find(item => item.email === normalizedEmail && item.status === 'pending');
+    if (existingRequest) return res.status(409).json({ message: 'Your registration request is still pending admin approval.', status: 'pending' });
+    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim().slice(0, 30) : '';
+    const location = typeof req.body.location === 'string' ? req.body.location.trim().slice(0, 120) : '';
+    const request = { name, email: normalizedEmail, passwordHash: await bcrypt.hash(password, 12), role: 'buyer', status: 'pending' };
+    if (phone) request.phone = phone;
+    if (location) request.location = location;
+    await insert('registrationRequests', request);
+    res.status(202).json({ status: 'pending', message: 'Registration submitted. An admin must approve your account before you can sign in.' });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed' }); } });
 router.get('/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
 router.patch('/auth/preferences', requireAuth, async (req, res) => {
   const { preferredLanguage } = req.body;
@@ -410,6 +467,49 @@ router.get('/market/trends', async (req, res) => {
   const startTime = Date.now() - requestedDays * 86400000;
   const points = buildMarketTrendPoints({ listings, auctions, bids, orders, startTime });
   res.json({ days: requestedDays, generatedAt: new Date().toISOString(), points });
+});
+router.get('/demand/forecast', requireAuth, allow('buyer', 'fisherman'), async (req, res) => {
+  try {
+    res.json(await demandSnapshot(req, { fisherman: req.user.role === 'fisherman', buyer: req.user.role === 'buyer' }));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
+});
+router.get('/demand/trending', requireAuth, allow('buyer'), async (req, res) => {
+  try {
+    const snapshot = await demandSnapshot(req, { buyer: true });
+    res.json({
+      asOf: snapshot.asOf,
+      model: snapshot.model,
+      dataAvailability: snapshot.dataAvailability,
+      buyerLocation: snapshot.buyerLocation || '',
+      trending: snapshot.mostDemanded,
+      increasing: snapshot.increasing,
+      decreasing: snapshot.decreasing,
+      locationBreakdown: snapshot.locationBreakdown,
+      disclaimer: snapshot.disclaimer
+    });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
+});
+router.get('/demand/buyer', requireAuth, allow('buyer'), async (req, res) => {
+  try {
+    res.json(await demandSnapshot(req, { buyer: true }));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
+});
+router.get('/demand/fisherman', requireAuth, allow('fisherman'), async (req, res) => {
+  try {
+    res.json(await demandSnapshot(req, { fisherman: true }));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ message: error.message });
+    throw error;
+  }
 });
 router.post('/price-predictions/preview', requireAuth, allow('buyer', 'fisherman'), async (req, res) => {
   try {
@@ -673,6 +773,150 @@ router.get('/auctions/:id', async (req, res) => {
     activeBidderCount: auctionBidderIds(auction, legacyBids).length
   });
 });
+router.get('/auctions/:id/insights', requireAuth, allow('buyer'), async (req, res) => {
+  const auction = await get('auctions', req.params.id);
+  if (!auction) return res.status(404).json({ message: 'Auction not found' });
+  const listing = await get('listings', auction.listing);
+  if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' });
+  const [auctions, listings, bids, orders] = await Promise.all(['auctions', 'listings', 'bids', 'orders'].map(list));
+  const listingById = new Map(listings.map(item => [item.id, item]));
+  const auctionsById = new Map(auctions.map(item => [item.id, item]));
+  const verifiedSales = orders.flatMap(order => {
+    const soldListing = listingById.get(order.listing);
+    const soldAuction = auctionsById.get(order.auction);
+    const quantity = Number(order.quantity || soldListing?.quantity);
+    const amount = Number(order.amount);
+    if (!isVerifiedPaidOrder(order, soldListing) || !soldAuction || soldAuction.status !== 'completed'
+      || !soldListing || !Number.isFinite(quantity) || quantity <= 0
+      || !Number.isFinite(amount) || amount <= 0) return [];
+    return [{
+      auctionId: soldAuction.id,
+      fishType: soldListing.fishType,
+      pricePerKg: amount / quantity
+    }];
+  });
+  const auctionBids = Object.values(auction.bidHistory || {}).length
+    ? Object.values(auction.bidHistory)
+    : where(bids, { auction: auction.id });
+  const insights = buildAuctionInsights({ auction, listing, bids: auctionBids, verifiedSales });
+  const [priceEstimate, demandSnapshot] = await Promise.all([
+    makePricePrediction({
+      fishType: listing.fishType,
+      quantity: listing.quantity,
+      quality: listing.quality || 'Good',
+      size: listing.size || 'Medium',
+      freshness: listing.freshness || 'fresh',
+      location: listing.location || ''
+    }, { save: false }),
+    Promise.resolve(buildDemandInsights({
+      orders,
+      listings,
+      auctions,
+      bids,
+      filters: { fishType: listing.fishType, location: listing.location || '' }
+    }))
+  ]);
+  const speciesDemand = demandSnapshot.species.find(item => item.fishType === listing.fishType) || null;
+  res.json({
+    ...insights,
+    priceEstimate: {
+      estimatePerKg: priceEstimate.estimatePerKg,
+      minimumPerKg: priceEstimate.minimumPerKg,
+      maximumPerKg: priceEstimate.maximumPerKg,
+      reliability: priceEstimate.reliability,
+      confidence: priceEstimate.confidence,
+      disclaimer: priceEstimate.disclaimer
+    },
+    demand: speciesDemand ? {
+      trend: speciesDemand.trend,
+      next7Days: speciesDemand.forecast.next7Days,
+      dataAvailability: demandSnapshot.dataAvailability.status,
+      disclaimer: demandSnapshot.disclaimer
+    } : {
+      trend: null,
+      next7Days: null,
+      dataAvailability: 'insufficient_data',
+      disclaimer: demandSnapshot.disclaimer
+    }
+  });
+});
+router.get('/auctions/:id/chat', requireAuth, async (req, res) => {
+  const auction = await get('auctions', req.params.id);
+  const listing = auction && await get('listings', auction.listing);
+  if (!auction || !listing || listing.status === 'removed') return res.status(404).json({ message: 'Auction not found' });
+  if (req.user.role !== 'buyer' && !(req.user.role === 'fisherman' && listing.fisherman === req.user.id)) {
+    return res.status(403).json({ message: 'Only buyers and the listing fisherman can view auction chat' });
+  }
+  const messages = sortNewest((await list('auctionMessages')).filter(message =>
+    message.auction === auction.id && message.status !== 'hidden')).slice(0, 100);
+  const authors = new Map();
+  for (const id of new Set(messages.map(message => message.author))) {
+    const user = await get('users', id);
+    authors.set(id, user?.name || 'Marketplace member');
+  }
+  res.json(messages.reverse().map(message => ({
+    id: message.id,
+    authorName: authors.get(message.author),
+    authorRole: message.authorRole,
+    content: message.content,
+    createdAt: message.createdAt,
+    isMine: message.author === req.user.id
+  })));
+});
+router.post('/auctions/:id/chat', requireAuth, async (req, res) => {
+  const auction = await get('auctions', req.params.id);
+  const listing = auction && await get('listings', auction.listing);
+  if (!auction || !listing || listing.status === 'removed') return res.status(404).json({ message: 'Auction not found' });
+  if (req.user.role !== 'buyer' && !(req.user.role === 'fisherman' && listing.fisherman === req.user.id)) {
+    return res.status(403).json({ message: 'Only buyers and the listing fisherman can post in auction chat' });
+  }
+  if (['completed', 'cancelled'].includes(auction.status) || Date.parse(auction.endTime) <= Date.now()) {
+    return res.status(409).json({ message: 'Auction chat is closed' });
+  }
+  const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+  if (!content || content.length > 500 || /[\w.+-]+@[\w.-]+\.[A-Z]{2,}/i.test(content)
+    || content.replace(/\D/g, '').length >= 10) {
+    return res.status(400).json({ message: 'Enter a message up to 500 characters. Contact details are not allowed.' });
+  }
+  const rateKey = createHash('sha256').update(`${auction.id}:${req.user.id}`).digest('hex');
+  const now = Date.now();
+  const rateLimit = await transact('auctionChatRateLimits', rateKey, current => {
+    if (current && now - Number(current.lastMessageAt || 0) < 1500) return current;
+    return { lastMessageAt: now };
+  });
+  if (!rateLimit.committed) return res.status(429).json({ message: 'Please wait a moment before sending another message' });
+  const message = await insert('auctionMessages', {
+    auction: auction.id,
+    author: req.user.id,
+    authorRole: req.user.role,
+    content,
+    status: 'published'
+  });
+  res.status(201).json({
+    id: message.id,
+    authorName: req.user.name || 'Marketplace member',
+    authorRole: req.user.role,
+    content: message.content,
+    createdAt: message.createdAt,
+    isMine: true
+  });
+});
+router.post('/auctions/:id/chat/:messageId/report', requireAuth, allow('buyer'), async (req, res) => {
+  const message = await get('auctionMessages', req.params.messageId);
+  if (!message || message.auction !== req.params.id || message.author === req.user.id) {
+    return res.status(404).json({ message: 'Message not found' });
+  }
+  const reportId = createHash('sha256').update(`${message.id}:${req.user.id}`).digest('hex');
+  const result = await transact('auctionMessageReports', reportId, current => current || {
+    auction: message.auction,
+    message: message.id,
+    reporter: req.user.id,
+    reason: typeof req.body.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '',
+    status: 'pending'
+  });
+  if (!result.committed) return res.status(409).json({ message: 'You already reported this message' });
+  res.status(201).json({ message: 'Report submitted for admin review' });
+});
 router.post('/auctions/:id/bids', requireAuth, allow('buyer'), async (req, res) => {
   const auction = await get('auctions', req.params.id);
   if (!auction) return res.status(404).json({ message: 'Auction not found' });
@@ -691,10 +935,28 @@ router.post('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), asyn
   const listing = await get('listings', auction.listing);
   if (!listing || listing.status === 'removed') return res.status(404).json({ message: 'This listing is no longer available' });
   if (listing.fisherman === req.user.id) return res.status(403).json({ message: 'You cannot bid on your own listing' });
-  const maxAmount = Number(req.body.maxAmount);
-  if (!Number.isFinite(maxAmount) || maxAmount <= 0) return res.status(400).json({ message: 'Enter a valid maximum bid amount' });
+  const quantity = Number(listing.quantity);
+  const hasBudget = req.body.totalBudget !== undefined && req.body.totalBudget !== '';
+  const totalBudget = hasBudget ? Number(req.body.totalBudget) : null;
+  const budgetIsValid = Number.isFinite(totalBudget) && totalBudget > 0
+    && Number.isSafeInteger(Math.round(totalBudget * 100))
+    && Math.abs(totalBudget * 100 - Math.round(totalBudget * 100)) < 1e-7;
+  if (hasBudget && (!budgetIsValid || !Number.isFinite(quantity) || quantity <= 0)) {
+    return res.status(400).json({ message: 'Enter a valid total budget for this listing' });
+  }
+  const maxByBudget = hasBudget ? Math.floor(totalBudget / quantity * 100) / 100 : null;
+  const requestedMax = req.body.maxAmount === undefined || req.body.maxAmount === ''
+    ? maxByBudget
+    : Number(req.body.maxAmount);
+  if (!Number.isFinite(requestedMax) || requestedMax <= 0) {
+    return res.status(400).json({ message: 'Enter a valid maximum bid per kg or a total budget' });
+  }
+  const maxAmount = hasBudget ? Math.min(requestedMax, maxByBudget) : requestedMax;
+  if (hasBudget && maxAmount * quantity > totalBudget + 1e-7) {
+    return res.status(400).json({ message: 'Maximum bid exceeds the total budget' });
+  }
   const requestId = typeof req.body.requestId === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(req.body.requestId) ? req.body.requestId : randomUUID();
-  const result = await submitAuctionOffer({ auction, amount: maxAmount, buyerId: req.user.id, mode: 'automatic', requestId });
+  const result = await submitAuctionOffer({ auction, amount: maxAmount, totalBudget, buyerId: req.user.id, mode: 'automatic', requestId });
   if (result.error) return res.status(400).json({ message: result.error });
   if (!result.response.duplicate) {
     try {
@@ -703,7 +965,9 @@ router.post('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), asyn
         auction: auction.id,
         type: 'automatic_bidding_activated',
         title: 'Automatic bidding activated',
-        message: `Automatic bidding is active up to your private limit of ₹${maxAmount.toLocaleString()}/kg.`,
+        message: hasBudget
+          ? `Automatic bidding is active within your private total budget of ₹${totalBudget.toLocaleString()} (up to ₹${maxAmount.toLocaleString()}/kg).`
+          : `Automatic bidding is active up to your private limit of ₹${maxAmount.toLocaleString()}/kg.`,
         read: false
       }, `automatic_${requestId}_${req.user.id}`);
     } catch (error) {
@@ -716,7 +980,11 @@ router.get('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), async
   const auction = await get('auctions', req.params.id);
   if (!auction) return res.status(404).json({ message: 'Auction not found' });
   const automaticBid = auction.autoBids?.[req.user.id];
-  res.json({ enabled: Boolean(automaticBid), maxAmount: automaticBid?.amount || null });
+  res.json({
+    enabled: Boolean(automaticBid),
+    maxAmount: automaticBid?.amount || null,
+    ...(automaticBid?.totalBudget ? { totalBudget: automaticBid.totalBudget } : {})
+  });
 });
 router.delete('/auctions/:id/automatic-bidding', requireAuth, allow('buyer'), async (req, res) => {
   const initialAuction = await get('auctions', req.params.id);
@@ -805,6 +1073,7 @@ router.get('/bid-monitoring', requireAuth, allow('fisherman', 'admin'), async (r
         quantity: Number(listing.quantity || 0),
         location: listing.location
       } : null,
+      activity: analyzeAuctionActivity(auctionBids),
       bids: sortNewest(auctionBids).map(bid => {
         const risk = assessBidRisk(bid, auctionBids, auction);
         const flags = bid.riskFlags?.length ? bid.riskFlags : risk.flags;

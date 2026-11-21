@@ -34,7 +34,14 @@ export function FishermanInventoryScreen() {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [priceEstimate, setPriceEstimate] = useState(null);
   const [priceEstimateError, setPriceEstimateError] = useState('');
+  const [demandEstimate, setDemandEstimate] = useState(null);
+  const [demandEstimateError, setDemandEstimateError] = useState('');
   const [editingListing, setEditingListing] = useState(null);
+  const [chatAuction, setChatAuction] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -61,6 +68,9 @@ export function FishermanInventoryScreen() {
     form.location
   ]);
   const currentPriceEstimate = priceEstimate?.key === priceEstimateKey ? priceEstimate.value : null;
+  const demandEstimateKey = JSON.stringify([showForm, form.fishType.trim()]);
+  const currentDemandEstimate = demandEstimate?.key === demandEstimateKey ? demandEstimate.value : null;
+  const currentDemandEstimateError = demandEstimateError?.key === demandEstimateKey ? demandEstimateError.message : '';
 
   useEffect(() => {
     if (!showForm || !form.fishType || !form.quantity || Number(form.quantity) <= 0) {
@@ -90,9 +100,48 @@ export function FishermanInventoryScreen() {
     }, 350);
     return () => { active = false; clearTimeout(timer); };
   }, [priceEstimateKey, showForm, form.fishType, form.quantity, form.quality, form.size, form.freshness, form.location]);
+  useEffect(() => {
+    if (!showForm || !form.fishType.trim()) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      mobileApi.demandForecast({ fishType: form.fishType.trim() }).then(value => {
+        if (active) {
+          const insight = value.species?.[0] || null;
+          setDemandEstimate({ key: demandEstimateKey, value: insight });
+          setDemandEstimateError(insight ? null : { key: demandEstimateKey, message: 'No verified historical sales for this species or location.' });
+        }
+      }).catch(demandError => {
+        if (active) setDemandEstimateError({ key: demandEstimateKey, message: demandError.message });
+      });
+    }, 350);
+    return () => { active = false; clearTimeout(timer); };
+  }, [demandEstimateKey, form.fishType, showForm]);
 
   const activeAuctions = listings.filter(item => item.saleMode === 'bid' && ['active', 'scheduled'].includes(item.auction?.status)).length;
   const activeListings = listings.filter(item => ['available', 'auction'].includes(item.status)).length;
+  const chatAuctionId = chatAuction?.id;
+
+  useEffect(() => {
+    if (!chatAuctionId) return undefined;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const messages = await mobileApi.auctionChat(chatAuctionId);
+        if (active) {
+          setChatMessages(messages);
+          setChatError('');
+        }
+      } catch (loadError) {
+        if (active) setChatError(loadError.message);
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [chatAuctionId]);
 
   function updateField(key, value) {
     setForm(current => ({ ...current, [key]: value }));
@@ -251,11 +300,44 @@ export function FishermanInventoryScreen() {
           detail={`Status: ${item.status || 'unknown'}${item.predictedLow && item.predictedHigh ? ` · Price guide ${money(item.predictedLow)}–${money(item.predictedHigh)}/kg` : ''}`}
           actions={<>
             {item.saleMode === 'bid' && item.auction && ['active', 'scheduled'].includes(item.auction.status) ? <Button label="Stop bidding" variant="secondary" onPress={() => confirmClose(item)} /> : null}
+            {item.saleMode === 'bid' && item.auction ? <Button label="Auction chat" variant="secondary" onPress={() => { setChatAuction({ ...item.auction, fishType: item.fishType }); setChatMessages([]); setChatError(''); }} /> : null}
             {item.saleMode !== 'bid' && item.status === 'available' && !item.auction ? <Button label="Edit listing" variant="secondary" onPress={() => setEditingListing(item)} /> : null}
             {item.status === 'available' && !item.auction ? <Button label="Delete listing" variant="danger" onPress={() => confirmDelete(item)} /> : null}
           </>}
         />
       ))}
+      <Modal visible={Boolean(chatAuction)} animationType="slide" onRequestClose={() => setChatAuction(null)}>
+        <Page title={`${chatAuction?.fishType || 'Auction'} chat`} subtitle="Reply to signed-in buyers and keep communication on-platform." onRefresh={() => mobileApi.auctionChat(chatAuctionId).then(setChatMessages).catch(loadError => setChatError(loadError.message))}>
+          <Card>
+            {chatError ? <Notice>{chatError}</Notice> : null}
+            {chatMessages.length ? chatMessages.slice(-30).map(chat => (
+              <View key={chat.id} style={styles.auctionChatMessage}>
+                <Text style={styles.auctionChatAuthor}>{chat.authorName} · {new Date(chat.createdAt).toLocaleString()}</Text>
+                <Text style={styles.auctionChatText}>{chat.content}</Text>
+              </View>
+            )) : !chatError ? <Empty>No buyer questions yet.</Empty> : null}
+            {!['completed', 'cancelled'].includes(chatAuction?.status) ? <>
+              <Field label="Reply to buyers" value={chatDraft} onChangeText={setChatDraft} placeholder="Write a reply (500 characters max)" multiline />
+              <Button label="Send reply" variant="secondary" onPress={async () => {
+                if (!chatDraft.trim()) return;
+                setChatSending(true);
+                try {
+                  const sent = await mobileApi.sendAuctionChat(chatAuctionId, chatDraft);
+                  setChatMessages(current => [...current, sent].slice(-100));
+                  setChatDraft('');
+                  setChatError('');
+                } catch (sendError) {
+                  setChatError(sendError.message);
+                } finally {
+                  setChatSending(false);
+                }
+              }} loading={chatSending} disabled={!chatDraft.trim()} />
+            </> : null}
+            <Text style={styles.auctionChatNote}>Messages are visible to signed-in buyers viewing this auction. Contact details are blocked.</Text>
+          </Card>
+          <Button label="Close chat" variant="secondary" onPress={() => setChatAuction(null)} />
+        </Page>
+      </Modal>
       <Modal visible={showForm} animationType="slide" onRequestClose={() => setShowForm(false)}>
         <Page title="Post a catch" subtitle="Add catch details, then choose direct sale or bidding.">
           <Card>
@@ -278,6 +360,8 @@ export function FishermanInventoryScreen() {
               {['same_day', 'fresh', 'chilled', 'frozen'].map(value => <Chip key={value} label={value.replace('_', ' ')} selected={(form.freshness || 'fresh') === value} onPress={() => updateField('freshness', value)} />)}
             </View>
             {currentPriceEstimate ? <PricePredictionSummary prediction={currentPriceEstimate} compact /> : null}
+            {currentDemandEstimate ? <Card><Text style={styles.orderTitle}>Verified demand · {currentDemandEstimate.forecast?.next7Days?.demandCategory || 'Insufficient data'}</Text><Text style={styles.orderMeta}>Next 7 days: {currentDemandEstimate.forecast?.next7Days?.expectedQuantityKg === null ? 'unavailable' : `${Number(currentDemandEstimate.forecast?.next7Days?.expectedQuantityKg).toLocaleString()} kg`} · {currentDemandEstimate.trend?.direction || 'Insufficient data'} trend</Text><Text style={styles.orderMeta}>This advisory will not change your selected price or quantity.</Text></Card> : null}
+            {currentDemandEstimateError ? <Notice>{currentDemandEstimateError}</Notice> : null}
             {currentPriceEstimate && Number(form.price) > 0
               && (Number(form.price) < currentPriceEstimate.minimumPerKg * 0.8 || Number(form.price) > currentPriceEstimate.maximumPerKg * 1.2)
               ? <Notice>Your chosen price is more than 20% outside this indicative range. This warning will not change your price.</Notice>
@@ -499,7 +583,11 @@ const styles = StyleSheet.create({
   photoPlaceholder: { minHeight: 90, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.pale },
   photoPlaceholderText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
   orderTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
-  orderMeta: { color: colors.muted, fontSize: 11 }
+  orderMeta: { color: colors.muted, fontSize: 11 },
+  auctionChatMessage: { gap: 5, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.line },
+  auctionChatAuthor: { color: colors.sea, fontSize: 10, fontWeight: '800' },
+  auctionChatText: { color: colors.ink, fontSize: 12, lineHeight: 18 },
+  auctionChatNote: { color: colors.muted, fontSize: 10 }
 });
 
 export function FishermanReputationScreen() {

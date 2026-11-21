@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
 import AdminTrustPricing from './AdminTrustPricing.jsx';
+import DemandForecastPanel from '../DemandForecastPanel.jsx';
+import AuctionAnalytics from '../AuctionAnalytics.jsx';
 
 export default function AdminDashboard() {
   const [view, setView] = useState('fishermen');
@@ -57,7 +59,7 @@ export default function AdminDashboard() {
         <p>Your marketplace, at a glance.</p>
         <div className="admin-hero-actions">
           <button className="button primary" onClick={() => setShowForm(true)}><UserPlus size={16} /> Create fisherman account</button>
-          <button className="admin-refresh" onClick={refreshDashboard} disabled={refreshing} aria-label="Refresh dashboard">
+          <button className="admin-refresh" onClick={refreshDashboard} disabled={refreshing} aria-label="Refresh data dashboard">
             <RefreshCw size={15} className={refreshing ? 'admin-spinning' : ''} /> {refreshing ? 'Refreshing' : 'Refresh data'}
           </button>
         </div>
@@ -106,6 +108,8 @@ export default function AdminDashboard() {
       <button role="tab" aria-selected={view === 'bids'} className={view === 'bids' ? 'active' : ''} onClick={() => setView('bids')}><Gavel size={18} /> Bid review</button>
       <button role="tab" aria-selected={view === 'transactions'} className={view === 'transactions' ? 'active' : ''} onClick={() => setView('transactions')}><CircleDollarSign size={18} /> Transactions</button>
       <button role="tab" aria-selected={view === 'trust'} className={view === 'trust' ? 'active' : ''} onClick={() => setView('trust')}><BadgeCheck size={18} /> Trust &amp; prices</button>
+      <button role="tab" aria-selected={view === 'demand'} className={view === 'demand' ? 'active' : ''} onClick={() => setView('demand')}><Activity size={18} /> Demand analytics</button>
+      <button role="tab" aria-selected={view === 'auctions'} className={view === 'auctions' ? 'active' : ''} onClick={() => setView('auctions')}><Gavel size={18} /> Auction analytics</button>
     </div>
     {view === 'fishermen' ? <section className="panel admin-page admin-fishermen-page">
       <div className="panel-title"><div><p className="kicker">YOUR COASTAL NETWORK</p><h2>Fishermen</h2></div><span>{fishermen.length} accounts · Select a profile to inspect sales</span></div>
@@ -130,7 +134,7 @@ export default function AdminDashboard() {
       <div className="panel-title"><div><p className="kicker">COMMUNITY ONBOARDING</p><h2>Buyer registration requests</h2></div><span>{requests.length} pending review</span></div>
       {requests.map(request => <div className="request-line" key={request.id}><div><strong>{request.name}</strong><small>{request.email}{request.phone ? ` · ${request.phone}` : ''}</small></div><div className="request-actions"><button className="button small primary" onClick={() => review(request.id, 'accept')}>Accept</button><button className="button small secondary" onClick={() => review(request.id, 'reject')}>Reject</button></div></div>)}
       {!requests.length && <p className="empty">You’re all caught up. New buyer requests will appear here.</p>}
-    </section> : view === 'bids' ? <BidMonitoring title="Marketplace bid history & review" /> : view === 'transactions' ? <TransactionHistory title="All payment transactions" /> : <AdminTrustPricing />}
+    </section> : view === 'bids' ? <BidMonitoring title="Marketplace bid history & review" /> : view === 'transactions' ? <TransactionHistory title="All payment transactions" /> : view === 'demand' ? <DemandForecastPanel role="admin" /> : view === 'auctions' ? <AuctionAnalytics /> : <AdminTrustPricing />}
     {showForm && <FishermanForm onClose={() => setShowForm(false)} onCreated={name => { setShowForm(false); setMessage(`${name} can now sign in as a fisherman.`); load(); }} />}
   </main>;
 }

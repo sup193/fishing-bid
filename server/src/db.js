@@ -20,11 +20,15 @@ function serviceAccount() {
 }
 
 function useLocalDatabase() {
-  if (process.env.TIDEMARKET_DATABASE === 'local') return true;
+  if (process.env.TIDEMARKET_DATABASE === 'local') {
+    if (process.env.NODE_ENV === 'production') throw new Error('The local database cannot be used in production');
+    return true;
+  }
   try {
     serviceAccount();
     return false;
-  } catch {
+  } catch (error) {
+    if (process.env.NODE_ENV === 'production') throw error;
     return true;
   }
 }

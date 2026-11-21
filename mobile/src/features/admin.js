@@ -177,6 +177,10 @@ export function AdminPeopleScreen() {
       setError('Name, email, and a temporary password are required.');
       return;
     }
+    if (form.password.length < 8 || form.password.length > 128) {
+      setError('The temporary password must contain 8 to 128 characters.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {

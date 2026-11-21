@@ -6,7 +6,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import bcrypt from 'bcryptjs';
-import path from 'node:path';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
 import { initFirebase, insert, list } from './db.js';
@@ -15,7 +14,7 @@ import { refreshAuction } from './utils.js';
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env') });
 
 export const app = express();
-app.use('/uploads', express.static(path.resolve(dirname(fileURLToPath(import.meta.url)), '../uploads')));
+app.use('/uploads', express.static(resolve(process.env.TIDEMARKET_UPLOAD_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '../uploads'))));
 app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"],
   baseUri: ["'self'"],
@@ -36,8 +35,32 @@ app.use('/api/payments/razorpay/webhook', express.raw({ type: 'application/json'
 app.use(express.json({ limit: '2mb' })); app.use(morgan('dev'));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'smart-fishing-api' }));
 app.use('/api', userRoutes); app.use('/api/admin', adminRoutes);
-app.use((error, req, res, next) => { console.error('Unhandled API error:', error); res.status(500).json({ message: 'Unexpected server error', detail: error.message }); });
-async function seed() { const users = await list('users'); const admin = users.find(user => user.email === 'tide@gmail.com'); const adminData = { name: 'Tide Admin', email: 'tide@gmail.com', passwordHash: await bcrypt.hash('Tide@123', 12), role: 'admin' }; if (admin) await (await import('./db.js')).update('users', admin.id, adminData); else await insert('users', adminData); }
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.parse.failed') {
+    console.warn('Rejected malformed JSON request body');
+    return res.status(400).json({ message: 'Invalid JSON request body' });
+  }
+  if (error.type === 'entity.too.large') {
+    console.warn('Rejected oversized request body');
+    return res.status(413).json({ message: 'Request body is too large' });
+  }
+  console.error('Unhandled API error:', error);
+  res.status(500).json({ message: 'Unexpected server error' });
+});
+async function seed() {
+  const users = await list('users');
+  const adminEmail = String(process.env.ADMIN_EMAIL || 'tide@gmail.com').trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Tide@123';
+  const admin = users.find(user => user.email === adminEmail);
+  const adminData = {
+    name: 'Tide Admin',
+    email: adminEmail,
+    passwordHash: await bcrypt.hash(adminPassword, 12),
+    role: 'admin'
+  };
+  if (admin) await (await import('./db.js')).update('users', admin.id, adminData);
+  else await insert('users', adminData);
+}
 let auctionSettlementRunning = false;
 async function settleAuctions() {
   if (auctionSettlementRunning) return;
@@ -59,6 +82,7 @@ async function settleAuctions() {
   }
 }
 export async function startServer({ port = process.env.PORT || 5000, sweepIntervalMs = 15_000 } = {}) {
+  validateProductionConfig();
   const database = initFirebase();
   if (database) console.log('Firebase Realtime Database: connecting...');
   await seed();
@@ -79,6 +103,12 @@ export async function startServer({ port = process.env.PORT || 5000, sweepInterv
       await new Promise((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
     }
   };
+}
+
+export function validateProductionConfig(env = process.env) {
+  if (env.NODE_ENV !== 'production') return;
+  if (!env.JWT_SECRET) throw new Error('JWT_SECRET is required in production');
+  if (!env.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is required in production');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -45,7 +45,11 @@ test('buyers see live bidding, errors, proxy bidding, history and outbid notices
   await detail.getByRole('button', { name: 'Activate automatic bidding' }).click();
   await expect(detail.getByRole('status')).toContainText('Automatic bidding is active');
 
-  const secondBuyer = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const secondContext = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    baseURL: 'http://127.0.0.1:5173'
+  });
+  const secondBuyer = await secondContext.newPage();
   await login(secondBuyer, 'buyer-2@auction.test');
   const secondDetail = await openAuction(secondBuyer, 'Mackerel');
   await secondDetail.locator('#automatic-bid-maximum').fill('1500');
@@ -57,7 +61,7 @@ test('buyers see live bidding, errors, proxy bidding, history and outbid notices
   await expect(activeBidders).toContainText('2');
   await expect(secondDetail.locator('.auction-bid-row')).toHaveCount(2);
   await expect(page.getByText('You have been outbid')).toBeVisible({ timeout: 20_000 });
-  await secondBuyer.close();
+  await secondContext.close();
 });
 
 test('closed auctions disable bids and the winning buyer can open existing checkout', async ({ page }) => {

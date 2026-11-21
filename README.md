@@ -17,6 +17,8 @@ The React user surface is in `client/src/user/` and the admin surface is in `cli
 
 To open the admin dashboard locally, start the project with `npm run dev`, go to `http://localhost:5173`, choose **Log in**, and enter the admin credentials above. Logging in with an admin account opens the command center for fisherman management, buyer registration requests, marketplace metrics, and transactions. Change the default development password before using this account outside a local demo.
 
+The credentials above are development defaults only. Production startup requires explicitly configured `JWT_SECRET` and `ADMIN_PASSWORD` values; set a unique administrator password and never use the development defaults in production.
+
 ### Save logins with a browser password manager
 
 The login and account-creation forms use standard username/password autocomplete fields so Chrome/Google Password Manager can offer to save or autofill each account after you sign in. Accept Chrome's **Save password?** prompt and choose the Google account/profile where you want it stored. If the prompt is not shown, use the key icon in Chrome's address bar or check Chrome → **Settings → Password Manager**. TideMarket stores account passwords as bcrypt hashes; it does not send plaintext passwords to Google. Admin, buyer, and fisherman logins use the same compatible login form.
@@ -57,9 +59,31 @@ The API checks auctions on startup and every 15 seconds. When an auction reaches
 
 Buyer auction details poll the API for live bid history and timer updates. Manual bids and automatic maximums are validated and serialized in an auction-record transaction. Automatic limits and bidder offer ceilings are stored privately under each auction and removed from public API responses; each accepted leading bid is also mirrored to the existing `bids` node for dashboard and history compatibility. Automatic bidding raises the public price only as needed, breaks equal maximums in favor of the earlier eligible offer, and never bids above a buyer's configured limit. A valid bid in the final 30 seconds extends the server-owned end time by 30 seconds. Auction results use the transactionally stored leader and price, then create the existing pending Razorpay checkout order.
 
-The API stores auction activity in `auctions/{id}` (`currentPrice`, `currentBidder`, `bidCount`, `bidderOffers`, `autoBids`, `bidHistory`, and request de-duplication keys), mirrors bid records to `bids`, and writes buyer notices to `notifications`. The maximum amounts are private application data and are not returned by public listing or auction endpoints. Deploy [database.rules.json](./database.rules.json) to Firebase Realtime Database to deny direct client reads and writes; the server's Firebase Admin SDK continues to perform authorized operations. Do not give browser or mobile clients Firebase Admin credentials.
+The API stores auction activity in `auctions/{id}` (`currentPrice`, `currentBidder`, `bidCount`, `bidderOffers`, `autoBids`, `bidHistory`, and request de-duplication keys), mirrors bid records to `bids`, and writes bid/closure notices for buyers and fishermen to `notifications`. The maximum amounts are private application data and are not returned by public listing or auction endpoints. Deploy [database.rules.json](./database.rules.json) to Firebase Realtime Database to deny direct client reads and writes; the server's Firebase Admin SDK continues to perform authorized operations. Do not give browser or mobile clients Firebase Admin credentials.
 
 New bids are flagged for human review when one buyer places at least five bids in 60 seconds, or when a bid is at least twice the previous high and exceeds it by at least five minimum increments. These are review signals, not proof of fraud; bids are not blocked automatically. The bid review screens show the full bid timeline and flagged activity.
+
+### Auction guidance, budget caps, and chat
+
+The buyer auction view includes an advisory next-bid suggestion, a final-price range, the existing fish-price estimate, and a demand snapshot. Historical auction ranges use same-species auction orders that completed and were verified as paid through Razorpay; at least five such orders are required. Below that threshold, the system clearly marks a low-confidence baseline that starts from the current bid and adds one to three minimum increments based on bidder activity. This is a transparent heuristic, not a trained auction model or an accuracy claim. The suggested next bid is the server-computed minimum increment and is never placed automatically.
+
+Automatic bidding can be limited by both a maximum bid per kilogram and an optional maximum total spend for the full listing. The backend derives the effective per-kilogram cap from the listing quantity, stores both limits privately with the auction, and never exposes them in public auction responses. Fishermen can answer buyer questions in a per-auction chat. Chat is visible to signed-in buyers and the listing fisherman, caps message length, rate-limits sends, and rejects email addresses and phone-like contact strings. Buyers can report messages for administrator review; moderation can hide or restore a message.
+
+Admin auction analytics aggregate auctions and bids by species and location, with optional date/species/category/location/status filters. Bid concentration and rapid-bid signals are rule-based review prompts only. Neither those signals nor chat reports automatically block bids, cancel auctions, or establish misconduct. Auction details continue using the existing short-interval API refresh in web and mobile; the project does not currently have client-authorized Firebase listeners or a WebSocket/SSE transport. Notifications for outbids, leading-bid changes, new seller bids, closing, and settlement remain in the notification workflow.
+
+The new authenticated endpoints are:
+
+| Endpoint | Allowed role | Purpose |
+|---|---|---|
+| `GET /api/auctions/:id/insights` | Buyer | Advisory auction range, next bid, price estimate, and demand snapshot |
+| `GET /api/auctions/:id/chat` | Buyer, owning fisherman | Read recent auction messages |
+| `POST /api/auctions/:id/chat` | Buyer, owning fisherman | Send a validated message in an open auction |
+| `POST /api/auctions/:id/chat/:messageId/report` | Buyer | Submit a message for admin review |
+| `GET /api/admin/auction-analytics` | Admin | Aggregate/filter auction activity and human-review signals |
+| `GET /api/admin/auction-chat/reports` | Admin | List pending chat reports |
+| `PATCH /api/admin/auction-chat/:id/moderation` | Admin | Hide or restore a reported message |
+
+Chat records and rate-limit markers are stored in the server-only `auctionMessages`, `auctionMessageReports`, and `auctionChatRateLimits` Firebase nodes. Budget ceilings remain in the existing private `auctions/{id}/autoBids` data. No Firebase client rule was loosened; deploy the existing default-deny [database.rules.json](./database.rules.json), and continue accessing these nodes only through the authenticated Express API/Firebase Admin SDK.
 
 ### Upload a real catch photo
 
@@ -78,6 +102,39 @@ Orders marked paid by the old demo checkout are not treated as verified Razorpay
 ### Fisherman reputation and fish-price estimates
 
 The marketplace shows an explainable fisherman trust score based on verified paid orders, approved reviews, recorded delivery data, administrator-reviewed disputes, and verification status. Buyers may review only their own verified completed orders; reviews are moderated before being included in public scores. The price assistant uses a transparent baseline until enough verified sales exist to evaluate a regression calibration. Recommendations are estimates, not guaranteed prices, and never overwrite a fisherman’s chosen listing price. See [FISHERMAN_TRUST_AND_AI_PRICE_PREDICTION_REPORT.md](./FISHERMAN_TRUST_AND_AI_PRICE_PREDICTION_REPORT.md) for formulas, database nodes, endpoints, model evaluation rules, testing status, and limitations.
+
+### AI demand forecasting
+
+The buyer, fisherman, and admin workspaces include demand insights derived from verified, non-demo Razorpay-paid marketplace orders. Only order quantities are used for quantitative demand forecasts; current listings and auction bids appear as separate activity context and are not treated as sales. Buyer insights are scoped to the buyer's saved location when present. Location comparisons use aggregated landing-area labels and do not expose buyer identities or order-level records.
+
+The current baseline is a weighted moving average over recent daily verified sales (7-, 28-, and 90-day lookbacks for 24-hour, 7-day, and 30-day estimates). A species forecast requires at least three distinct sale days in its window; otherwise the UI reports insufficient data. Demand categories compare the forecast daily rate with that species' observed average (High at 120% or more, Low at 80% or less, otherwise Medium). Confidence reflects the count of sale days. Weekly day-of-week insights appear only when history is sufficiently long. This is a transparent baseline, not a deep-learning model, guaranteed demand, or proof of seasonal/festival effects.
+
+Admins can filter analytics by date range, species, category, and location, and review rolling one-day-ahead performance (MAE, MAPE when defined, and sMAPE) when enough held-out observations exist. Evaluation uses only the 28 days before each evaluated day. Fisherman quantity suggestions are advisory and capped by that fisherman's recorded available catch. The listing form may show a demand note next to the existing price estimate; no forecast automatically creates or edits a listing, price, or quantity.
+
+Demand endpoints (all require bearer-token authentication):
+
+| Endpoint | Allowed role | Purpose |
+|---|---|---|
+| `GET /api/demand/forecast` | Buyer, fisherman | Filterable demand snapshot |
+| `GET /api/demand/trending` | Buyer | Compact trending and location insights |
+| `GET /api/demand/buyer` | Buyer | Buyer dashboard forecast and aggregated locations |
+| `GET /api/demand/fisherman` | Fisherman | Forecasts and inventory-capped recommendations |
+| `GET /api/admin/demand/analytics` | Admin | Filterable aggregate demand analytics |
+| `GET /api/admin/demand/performance` | Admin | Walk-forward forecast evaluation |
+
+Optional query filters are `from` and `to` (`YYYY-MM-DD`), `fishType`, `category`, and `location`; date ranges are limited to 366 days. Forecast and performance results are computed from existing `orders`, `listings`, `auctions`, and `bids` nodes; no duplicate demand-history node or model training store is required. Existing Firebase rules remain default-deny for direct client access; the authenticated Express API uses Firebase Admin. See [AI_DEMAND_FORECASTING_REPORT.md](./AI_DEMAND_FORECASTING_REPORT.md) for implementation details, evaluation status, setup, and limitations.
+
+Run validation from the repository root:
+
+```powershell
+npm test --prefix server
+npm run build --prefix client
+npm run test:e2e --prefix client
+```
+
+For Expo compatibility, run `npx expo export --platform web` from `mobile/`; run `npm run lint` there for the full mobile lint suite.
+
+See [AI_LIVE_AUCTION_REPORT.md](./AI_LIVE_AUCTION_REPORT.md) for auction-guidance methodology, data requirements, endpoints, tests, and current limitations.
 
 ## Fish image classifier
 

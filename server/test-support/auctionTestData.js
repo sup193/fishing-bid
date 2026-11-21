@@ -87,6 +87,7 @@ export async function createAuctionDatabase(databasePath) {
   addAuction('auction-voice', { fishType: 'Tilapia' });
   addAuction('auction-web', { fishType: 'Mackerel' });
   addAuction('auction-mobile', { fishType: 'Sardine' });
+  addAuction('auction-notifications', { fishType: 'Anchovy' });
   addAuction('auction-closed', {
     fishType: 'Pomfret',
     auction: {

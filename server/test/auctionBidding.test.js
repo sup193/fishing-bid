@@ -64,6 +64,22 @@ test('automatic bidding starts at the necessary increment, not the buyer maximum
   assert.equal(result.bid.amount, 550);
 });
 
+test('automatic bidding retains the buyer-private total budget beside its per-kilogram cap', () => {
+  const result = applyAuctionOffer(makeAuction(), {
+    buyerId: 'buyer-a',
+    amount: 666.66,
+    totalBudget: 8000,
+    mode: 'automatic',
+    bidId: 'budget-bid',
+    requestId: 'budget-request',
+    now
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.auction.autoBids['buyer-a'].amount, 666.66);
+  assert.equal(result.auction.autoBids['buyer-a'].totalBudget, 8000);
+  assert.equal(publicAuction(result.auction).autoBids, undefined);
+});
+
 test('competing automatic bidders raise only as needed and respect both limits', () => {
   const first = offer(makeAuction(), 'buyer-a', 1000, 'automatic');
   const second = offer(first.auction, 'buyer-b', 1500, 'automatic', now + 1);

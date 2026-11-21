@@ -65,12 +65,13 @@ export function BidMonitoringScreen() {
         <Card key={auction.id}>
           <TextRow label={auction.listing?.fishType || 'Auction'} value={auction.status} strong />
           <TextRow label={`${auction.listing?.quantity || 0} kg · ${auction.listing?.location || 'Port unavailable'}`} value={`${auction.bids.length} bids`} />
+          {auction.activity?.reviewNeeded ? <Notice>{auction.activity.flags.map(flag => flag.detail).join(' · ')}</Notice> : null}
           {auction.winnerName ? <TextRow label={`Winner: ${auction.winnerName}`} value={money(auction.winningBid)} /> : null}
           {auction.bids.map(bid => (
             <Card key={bid.id} style={{ padding: 11, backgroundColor: bid.riskReviewNeeded ? '#fff5e8' : '#f3f8f7' }}>
               <TextRow label={bid.buyer?.name || 'Buyer'} value={`${money(bid.amount)}/kg`} strong />
               <TextRow label={formatDate(bid.createdAt)} value={bid.riskReviewNeeded ? 'Review flagged' : 'No review flag'} />
-              {bid.riskFlags?.length ? <Notice>{bid.riskFlags.join(', ')}</Notice> : null}
+              {bid.riskFlags?.length ? <Notice>{bid.riskFlags.map(flag => flag.detail || flag.code || 'Review signal').join(', ')}</Notice> : null}
             </Card>
           ))}
         </Card>

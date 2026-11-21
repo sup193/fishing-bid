@@ -39,7 +39,8 @@
         {
           "photosPermission": "TideMarket needs access to your photos so you can add catch images to listings."
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }

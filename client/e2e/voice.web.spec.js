@@ -13,14 +13,27 @@ async function login(page, email) {
 test('buyer preferences persist and typed multilingual search filters the live marketplace', async ({ page }) => {
   await login(page, 'buyer-3@auction.test');
   const language = page.locator('.voice-language-select select');
-  const preference = page.waitForResponse(response => response.url().endsWith('/api/auth/preferences') && response.request().method() === 'PATCH');
-  await language.selectOption('kn');
-  const saved = await preference;
-  expect(saved.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'ಧ್ವನಿ ಮಾರುಕಟ್ಟೆ' })).toBeVisible();
-  await expect(page.getByText('ಭಾಷೆಯ ಆಯ್ಕೆ ಉಳಿಸಲಾಗಿದೆ.')).toBeVisible();
+  const supportedLanguages = [
+    { code: 'en', title: 'Voice marketplace', saved: 'Language preference saved.' },
+    { code: 'kn', title: 'ಧ್ವನಿ ಮಾರುಕಟ್ಟೆ', saved: 'ಭಾಷೆಯ ಆಯ್ಕೆ ಉಳಿಸಲಾಗಿದೆ.' },
+    { code: 'hi', title: 'आवाज़ बाज़ार', saved: 'भाषा प्राथमिकता सहेजी गई।' },
+    { code: 'ta', title: 'குரல் சந்தை', saved: 'மொழி விருப்பம் சேமிக்கப்பட்டது.' },
+    { code: 'te', title: 'వాయిస్ మార్కెట్', saved: 'భాష ప్రాధాన్యత సేవ్ చేయబడింది.' },
+    { code: 'ml', title: 'വോയ്സ് മാർക്കറ്റ്', saved: 'ഭാഷാ മുൻഗണന സംരക്ഷിച്ചു.' }
+  ];
+  for (const option of supportedLanguages) {
+    const preference = page.waitForResponse(response => response.url().endsWith('/api/auth/preferences') && response.request().method() === 'PATCH');
+    await language.selectOption(option.code);
+    const saved = await preference;
+    expect(saved.status()).toBe(200);
+    expect((await saved.json()).user.preferredLanguage).toBe(option.code);
+    await expect(page.getByRole('heading', { name: option.title })).toBeVisible();
+    await expect(page.getByText(option.saved)).toBeVisible();
+  }
 
+  const englishPreference = page.waitForResponse(response => response.url().endsWith('/api/auth/preferences') && response.request().method() === 'PATCH');
   await language.selectOption('en');
+  expect((await englishPreference).status()).toBe(200);
   await expect(page.getByRole('heading', { name: 'Voice marketplace' })).toBeVisible();
   const command = page.getByLabel('Type a command');
   await command.fill('Find prawns under 500 in Mangalore');
@@ -46,9 +59,10 @@ test('voice bid details require confirmation before any bid request is submitted
   await expect.poll(() => submissions).toBe(1);
   await expect(page.getByText('Your bid was submitted.')).toBeVisible();
 
-  const secondBuyer = await browser.newPage();
+  const secondContext = await browser.newContext({ baseURL: 'http://127.0.0.1:5173' });
+  const secondBuyer = await secondContext.newPage();
   await login(secondBuyer, 'buyer-4@auction.test');
   await expect(secondBuyer.getByRole('heading', { name: 'Voice marketplace' })).toBeVisible();
   await expect(secondBuyer.getByLabel('Type a command')).toBeVisible();
-  await secondBuyer.close();
+  await secondContext.close();
 });

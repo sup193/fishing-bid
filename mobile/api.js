@@ -41,6 +41,12 @@ async function request(path, { token, ...options } = {}) {
 }
 
 const json = body => JSON.stringify(body);
+const queryString = values => {
+  const params = new URLSearchParams(
+    Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+  return params.size ? `?${params}` : '';
+};
 const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 export const mobileApi = {
@@ -50,6 +56,11 @@ export const mobileApi = {
   updatePreferredLanguage: preferredLanguage => request('/auth/preferences', { method: 'PATCH', body: json({ preferredLanguage }) }),
   listings: () => request('/listings'),
   marketTrends: days => request(`/market/trends?days=${encodeURIComponent(days)}`),
+  demandForecast: filters => request(`/demand/forecast${queryString(filters)}`),
+  buyerDemand: filters => request(`/demand/buyer${queryString(filters)}`),
+  fishermanDemand: filters => request(`/demand/fisherman${queryString(filters)}`),
+  adminDemandAnalytics: filters => request(`/admin/demand/analytics${queryString(filters)}`),
+  adminDemandPerformance: () => request('/admin/demand/performance'),
   recommendations: () => request('/recommendations'),
   buyerHistory: () => request('/buyer/history'),
   buyerReviews: () => request('/buyer/reviews'),
@@ -60,8 +71,12 @@ export const mobileApi = {
   pricePrediction: body => request('/price-predictions', { method: 'POST', body: json(body) }),
   previewPricePrediction: body => request('/price-predictions/preview', { method: 'POST', body: json(body) }),
   auction: auctionId => request(`/auctions/${encodeURIComponent(auctionId)}`),
+  auctionInsights: auctionId => request(`/auctions/${encodeURIComponent(auctionId)}/insights`),
+  auctionChat: auctionId => request(`/auctions/${encodeURIComponent(auctionId)}/chat`),
+  sendAuctionChat: (auctionId, content) => request(`/auctions/${encodeURIComponent(auctionId)}/chat`, { method: 'POST', body: json({ content }) }),
+  reportAuctionMessage: (auctionId, messageId, reason) => request(`/auctions/${encodeURIComponent(auctionId)}/chat/${encodeURIComponent(messageId)}/report`, { method: 'POST', body: json({ reason }) }),
   bid: (auctionId, amount, requestId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`) => request(`/auctions/${encodeURIComponent(auctionId)}/bids`, { method: 'POST', body: json({ amount, requestId }) }),
-  automaticBidding: (auctionId, maxAmount) => request(`/auctions/${encodeURIComponent(auctionId)}/automatic-bidding`, { method: 'POST', body: json({ maxAmount, requestId: `mobile-auto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) }),
+  automaticBidding: (auctionId, maxAmount, totalBudget) => request(`/auctions/${encodeURIComponent(auctionId)}/automatic-bidding`, { method: 'POST', body: json({ ...(maxAmount ? { maxAmount } : {}), ...(totalBudget ? { totalBudget } : {}), requestId: `mobile-auto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}` }) }),
   automaticBiddingStatus: auctionId => request(`/auctions/${encodeURIComponent(auctionId)}/automatic-bidding`),
   disableAutomaticBidding: auctionId => request(`/auctions/${encodeURIComponent(auctionId)}/automatic-bidding`, { method: 'DELETE' }),
   notifications: () => request('/notifications'),
@@ -69,6 +84,9 @@ export const mobileApi = {
   fishermanListings: () => request('/fisherman/listings'),
   fishermanSales: () => request('/fisherman/sales'),
   bidMonitoring: () => request('/bid-monitoring'),
+  adminAuctionAnalytics: filters => request(`/admin/auction-analytics${queryString(filters)}`),
+  adminAuctionChatReports: () => request('/admin/auction-chat/reports'),
+  moderateAuctionMessage: (messageId, body) => request(`/admin/auction-chat/${encodeURIComponent(messageId)}/moderation`, { method: 'PATCH', body: json(body) }),
   meta: () => request('/meta'),
   uploadImage: async asset => {
     const mimeType = asset.mimeType || 'image/jpeg';

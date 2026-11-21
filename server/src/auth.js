@@ -1,12 +1,18 @@
 import jwt from 'jsonwebtoken';
 import { get, sanitizeUser } from './db.js';
 
-export function signUser(user) { return jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '7d' }); }
+function jwtSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET is required in production');
+  return 'dev-only-secret-change-before-production';
+}
+
+export function signUser(user) { return jwt.sign({ id: user.id, role: user.role }, jwtSecret(), { expiresIn: '7d' }); }
 export async function requireAuth(req, res, next) {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) return res.status(401).json({ message: 'Authentication required' });
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+    const payload = jwt.verify(token, jwtSecret());
     req.user = sanitizeUser(await get('users', payload.id));
     if (!req.user) return res.status(401).json({ message: 'User not found' });
     next();

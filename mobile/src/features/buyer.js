@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Button, Card, Chip, Empty, Field, ListingCard, Loading, Notice, Page, SectionTitle, Stat, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
@@ -11,6 +12,8 @@ const filters = ['All catches', 'Fixed price', 'Auctions', 'For you'];
 
 export function BuyerMarketScreen() {
   const { user, updateUser } = useAuth();
+  const { fishType } = useLocalSearchParams();
+  const router = useRouter();
   const [listings, setListings] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [filter, setFilter] = useState('All catches');
@@ -28,7 +31,14 @@ export function BuyerMarketScreen() {
   const [auctionDetail, setAuctionDetail] = useState(null);
   const [bidAmount, setBidAmount] = useState('');
   const [automaticMax, setAutomaticMax] = useState('');
+  const [automaticBudget, setAutomaticBudget] = useState('');
   const [automaticEnabled, setAutomaticEnabled] = useState(false);
+  const [auctionInsights, setAuctionInsights] = useState(null);
+  const [auctionChat, setAuctionChat] = useState([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [auctionDetailError, setAuctionDetailError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [automaticLoading, setAutomaticLoading] = useState(false);
   const [auctionNow, setAuctionNow] = useState(0);
@@ -55,7 +65,6 @@ export function BuyerMarketScreen() {
   }, []);
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
-
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -82,14 +91,9 @@ export function BuyerMarketScreen() {
     try {
       const detail = await mobileApi.auction(selectedAuctionId);
       setAuctionDetail(detail);
-      if (detail.auction.minimumBid) {
-        setBidAmount(current => !current || Number(current) < detail.auction.minimumBid
-          ? String(detail.auction.minimumBid)
-          : current);
-      }
-      setError('');
+      setAuctionDetailError('');
     } catch (detailError) {
-      setError(detailError.message);
+      setAuctionDetailError(detailError.message);
     }
   }, [selectedAuctionId]);
 
@@ -103,11 +107,36 @@ export function BuyerMarketScreen() {
   useEffect(() => {
     if (!selectedAuctionId) return undefined;
     let active = true;
+    mobileApi.auctionInsights(selectedAuctionId)
+      .then(insights => { if (active) setAuctionInsights(insights); })
+      .catch(loadError => { if (active) setChatError(loadError.message); });
+    const refreshChat = async () => {
+      try {
+        const chat = await mobileApi.auctionChat(selectedAuctionId);
+        if (!active) return;
+        setAuctionChat(chat);
+        setChatError('');
+      } catch (loadError) {
+        if (active) setChatError(loadError.message);
+      }
+    };
+    refreshChat();
+    const interval = setInterval(refreshChat, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selectedAuctionId]);
+
+  useEffect(() => {
+    if (!selectedAuctionId) return undefined;
+    let active = true;
     mobileApi.automaticBiddingStatus(selectedAuctionId)
       .then(result => {
         if (!active) return;
         setAutomaticEnabled(result.enabled);
         setAutomaticMax(result.maxAmount ? String(result.maxAmount) : '');
+        setAutomaticBudget(result.totalBudget ? String(result.totalBudget) : '');
       })
       .catch(statusError => { if (active) setError(statusError.message); });
     return () => { active = false; };
@@ -140,11 +169,11 @@ export function BuyerMarketScreen() {
         : filter === 'Auctions'
           ? item.saleMode === 'bid'
           : true;
-      const query = search.trim().toLowerCase();
+      const query = (search || (typeof fishType === 'string' ? fishType : '')).trim().toLowerCase();
       const matchesQuery = !query || `${item.fishType} ${item.location} ${item.fisherman?.name || ''}`.toLowerCase().includes(query);
       return matchesMode && matchesQuery && (!voiceFilter || filterVoiceListings([item], voiceFilter).length > 0);
     });
-  }, [filter, listings, recommendations, search, voiceFilter]);
+  }, [filter, fishType, listings, recommendations, search, voiceFilter]);
 
   const activeAuction = auctionDetail?.auction || selectedAuction?.auction;
   const minimumBid = Number(activeAuction?.minimumBid || Number(activeAuction?.currentPrice || activeAuction?.startPrice || selectedAuction?.expectedPrice || 0)
@@ -180,15 +209,16 @@ export function BuyerMarketScreen() {
   }
 
   async function saveAutomaticBidding() {
-    const amount = Number(automaticMax);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError('Enter a valid maximum bid amount.');
+    const amount = automaticMax ? Number(automaticMax) : null;
+    const budget = automaticBudget ? Number(automaticBudget) : null;
+    if ((!Number.isFinite(amount) || amount <= 0) && (!Number.isFinite(budget) || budget <= 0)) {
+      setError('Enter a maximum bid per kg or a total budget.');
       return;
     }
     setAutomaticLoading(true);
     setError('');
     try {
-      await mobileApi.automaticBidding(selectedAuctionId, amount);
+      await mobileApi.automaticBidding(selectedAuctionId, amount, budget);
       setAutomaticEnabled(true);
       setMessage('Automatic bidding is active. Your maximum stays private.');
       await refreshAuctionDetail();
@@ -196,6 +226,21 @@ export function BuyerMarketScreen() {
       setError(saveError.message);
     } finally {
       setAutomaticLoading(false);
+    }
+  }
+
+  async function sendAuctionMessage() {
+    if (!selectedAuctionId || !chatDraft.trim()) return;
+    setChatSending(true);
+    setChatError('');
+    try {
+      const sent = await mobileApi.sendAuctionChat(selectedAuctionId, chatDraft);
+      setAuctionChat(current => [...current, sent].slice(-100));
+      setChatDraft('');
+    } catch (sendError) {
+      setChatError(sendError.message);
+    } finally {
+      setChatSending(false);
     }
   }
 
@@ -259,7 +304,10 @@ export function BuyerMarketScreen() {
         onDaysChange={setTrendDays}
         onFishChange={setTrendType}
       />
-      <Field label="Find seafood or port" value={search} onChangeText={setSearch} placeholder="Try tuna or Mangalore" autoCapitalize="none" />
+      <Field label="Find seafood or port" value={search || (typeof fishType === 'string' ? fishType : '')} onChangeText={value => {
+        setSearch(value);
+        if (typeof fishType === 'string') router.setParams({ fishType: undefined });
+      }} placeholder="Try tuna or Mangalore" autoCapitalize="none" />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
         {filters.map(item => <Chip key={item} label={item} selected={filter === item} onPress={() => setFilter(item)} />)}
       </ScrollView>
@@ -278,7 +326,13 @@ export function BuyerMarketScreen() {
                 setAuctionDetail(null);
                 setAutomaticEnabled(false);
                 setAutomaticMax('');
+                setAutomaticBudget('');
+                setAuctionInsights(null);
+                setAuctionChat([]);
+                setChatDraft('');
+                setChatError('');
                 setError('');
+                setAuctionDetailError('');
                 setSelectedAuction(item);
                 setBidAmount(String(next));
                 setAuctionNow(Date.now());
@@ -304,7 +358,20 @@ export function BuyerMarketScreen() {
                 <Text style={styles.auctionFact}>Status: {activeAuction?.status || 'loading'}</Text>
                 {activeAuction?.currentBidder?.name ? <Text style={styles.auctionFact}>Leading: {activeAuction.currentBidder.name}</Text> : null}
               </View>
+              {auctionInsights ? <Card style={styles.auctionInsightCard}>
+                <Text style={styles.historyTitle}>Smart auction guide · {auctionInsights.confidence} confidence</Text>
+                <Text style={styles.auctionFact}>Suggested next bid: {money(auctionInsights.suggestedBidPerKg)}/kg</Text>
+                <Text style={styles.auctionFact}>Estimated closing range: {money(auctionInsights.estimatedFinalPricePerKg.minimumPerKg)}–{money(auctionInsights.estimatedFinalPricePerKg.maximumPerKg)}/kg</Text>
+                <Text style={styles.muted}>{auctionInsights.verifiedHistoricalAuctionCount
+                  ? `${auctionInsights.verifiedHistoricalAuctionCount} verified paid auction sales inform this estimate.`
+                  : 'Insufficient verified auction history; using a low-confidence bid-activity baseline.'}</Text>
+                {auctionInsights.priceEstimate ? <Text style={styles.muted}>Fish price guide: {money(auctionInsights.priceEstimate.minimumPerKg)}–{money(auctionInsights.priceEstimate.maximumPerKg)}/kg · {auctionInsights.priceEstimate.reliability}</Text> : null}
+                {auctionInsights.demand?.trend ? <Text style={styles.muted}>Demand: {auctionInsights.demand.trend.direction} over the recorded market history.</Text> : null}
+                <Text style={styles.muted}>{auctionInsights.disclaimer}</Text>
+                {!auctionClosed ? <Button label="Use suggested next bid" compact variant="secondary" onPress={() => setBidAmount(String(auctionInsights.suggestedBidPerKg))} /> : null}
+              </Card> : null}
               {remaining > 0 && remaining <= 300000 ? <Text style={styles.closingNotice}>A valid bid in the final 30 seconds extends the auction by 30 seconds.</Text> : null}
+              {auctionDetailError ? <Notice>{auctionDetailError}</Notice> : null}
               <Text style={styles.historyTitle}>Bid history · {auctionDetail?.bids?.length || 0}</Text>
               {auctionDetail?.bids?.length
                 ? auctionDetail.bids.map(bid => (
@@ -317,6 +384,31 @@ export function BuyerMarketScreen() {
                   </View>
                 ))
                 : <Text style={styles.muted}>No bids yet.</Text>}
+              <Card style={styles.auctionChatCard}>
+                <Text style={styles.historyTitle}>Auction chat</Text>
+                {chatError ? <Notice>{chatError}</Notice> : null}
+                {auctionChat.slice(-8).map(chat => <View key={chat.id} style={styles.auctionChatMessage}>
+                  <Text style={styles.auctionChatAuthor}>{chat.authorName} · {new Date(chat.createdAt).toLocaleTimeString()}</Text>
+                  <Text style={styles.auctionFact}>{chat.content}</Text>
+                  {!chat.isMine ? <Button label="Report" compact variant="secondary" onPress={() => Alert.alert('Report message', 'Send this message to admin for review?', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Report', onPress: async () => {
+                      try {
+                        await mobileApi.reportAuctionMessage(selectedAuctionId, chat.id, 'Buyer report');
+                        setChatError('Message sent to admin for review.');
+                      } catch (reportError) {
+                        setChatError(reportError.message);
+                      }
+                    } }
+                  ])} /> : null}
+                </View>)}
+                {!auctionChat.length && !chatError ? <Text style={styles.muted}>Ask a question about this catch.</Text> : null}
+                {!auctionClosed ? <>
+                  <Field label="Message the fisherman" value={chatDraft} onChangeText={setChatDraft} placeholder="Ask a question (500 characters max)" multiline />
+                  <Button label="Send message" variant="secondary" onPress={sendAuctionMessage} loading={chatSending} disabled={!chatDraft.trim()} />
+                </> : null}
+                <Text style={styles.muted}>Chat is visible to buyers and the fisherman. Contact details are not allowed.</Text>
+              </Card>
               {!auctionClosed ? <>
                 <Field label={`Manual bid per kg (minimum ${money(minimumBid)})`} value={bidAmount} onChangeText={setBidAmount} placeholder="Enter your bid" keyboardType="decimal-pad" autoCapitalize="none" />
                 <Button label="Submit bid" onPress={submitBid} loading={submitting} />
@@ -327,7 +419,9 @@ export function BuyerMarketScreen() {
                   </View>
                   <Text style={styles.muted}>Bids increase only as needed and never exceed your private maximum.</Text>
                   <Field label="Maximum bid per kg (₹)" value={automaticMax} onChangeText={setAutomaticMax} placeholder="Set your maximum" keyboardType="decimal-pad" autoCapitalize="none" />
-                  <Button label={automaticEnabled ? 'Update maximum' : 'Activate automatic bidding'} variant="secondary" onPress={saveAutomaticBidding} loading={automaticLoading} />
+                  <Field label="Optional total budget for this catch (₹)" value={automaticBudget} onChangeText={setAutomaticBudget} placeholder="Caps total spend" keyboardType="decimal-pad" autoCapitalize="none" />
+                  <Button label={automaticEnabled ? 'Update maximum' : 'Activate automatic bidding'} variant="secondary" onPress={saveAutomaticBidding} loading={automaticLoading} disabled={!(automaticMax || automaticBudget)} />
+                  <Text style={styles.muted}>The server enforces both limits against the listing quantity. Your budget remains private.</Text>
                 </View>
               </> : <Text style={styles.muted}>{activeAuction?.winner ? 'Auction closed. The winner can continue to checkout on the web app.' : 'Auction closed without bids.'}</Text>}
               {error ? <Notice>{error}</Notice> : null}
@@ -588,6 +682,10 @@ const styles = StyleSheet.create({
   modalSubtitle: { color: colors.muted, fontSize: 12 },
   auctionFacts: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   auctionFact: { padding: 8, borderRadius: 8, backgroundColor: '#eef7f3', color: colors.ink, fontSize: 10, fontWeight: '700' },
+  auctionInsightCard: { gap: 8, backgroundColor: '#f6faf8' },
+  auctionChatCard: { gap: 9 },
+  auctionChatMessage: { gap: 6, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#edf2ef' },
+  auctionChatAuthor: { color: colors.sea, fontSize: 10, fontWeight: '800' },
   closingNotice: { padding: 10, borderRadius: 8, backgroundColor: '#fff8e9', color: '#85621a', fontSize: 10, lineHeight: 15 },
   historyTitle: { color: colors.ink, fontSize: 13, fontWeight: '800' },
   bidHistoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#edf2ef' },

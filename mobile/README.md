@@ -4,9 +4,11 @@ The Expo app uses Expo Router for role-based navigation and Expo SecureStore for
 
 ## Mobile workspaces
 
-- **Buyer:** browse fixed-price and auction listings, compare auction/listing/verified-sales price trends, place manual or automatic bids with a private maximum, follow live bid history and countdowns, receive auction notifications, see recommendations, review bids and orders, and view payment transactions.
-- **Fisherman:** post fixed-price or auction listings, stop auctions, review buyer orders, advance paid orders through processing/delivery/completion, view verified sales, monitor bids, and review transactions.
-- **Admin:** view marketplace totals and recent orders, moderate listings, manage fisherman accounts, review buyer registration requests, monitor bids, and review transactions.
+- **Buyer:** browse fixed-price and auction listings, compare auction/listing/verified-sales price trends, view location-scoped demand insights and available matching catches, place manual or automatic bids with a private maximum, follow live bid history and countdowns, receive auction notifications, see recommendations, review bids and orders, and view payment transactions.
+- **Fisherman:** post fixed-price or auction listings, see price estimates and verified demand guidance without automatic price or quantity changes, review advisory catch recommendations, stop auctions, review buyer orders, advance paid orders through processing/delivery/completion, view verified sales, monitor bids, and review transactions.
+- **Admin:** view marketplace totals and recent orders, filter aggregated demand analytics by date/species/category/location, review rolling forecast performance, moderate listings, manage fisherman accounts, review buyer registration requests, monitor bids, and review transactions.
+
+Demand forecasts use a transparent weighted moving average over verified, non-demo Razorpay-paid order quantities. At least three distinct sale days are required for an individual forecast; otherwise the app shows that there is insufficient data. Listings and bids are displayed only as activity context, not as realized sales. Forecasts and catch recommendations are advisory and do not guarantee future sales.
 
 Razorpay checkout is not yet available inside the native app. Buyers can use the website to complete a payment; the app does not create or mark a payment as paid without a verified checkout.
 
