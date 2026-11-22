@@ -11,10 +11,11 @@ import adminRoutes from './routes/admin.js';
 import { initSupabase, insert, list } from './db.js';
 import { refreshAuction } from './utils.js';
 
-dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env') });
+const backendDirectory = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(backendDirectory, '../.env'), override: false });
+dotenv.config({ path: resolve(backendDirectory, '../../.env'), override: false });
 
 export const app = express();
-app.use('/uploads', express.static(resolve(process.env.TIDEMARKET_UPLOAD_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '../uploads'))));
 app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"],
   baseUri: ["'self'"],
@@ -109,6 +110,9 @@ export function validateProductionConfig(env = process.env) {
   if (env.NODE_ENV !== 'production') return;
   if (!env.JWT_SECRET) throw new Error('JWT_SECRET is required in production');
   if (!env.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is required in production');
+  if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is required in production');
+  if (!env.OTP_FROM_EMAIL) throw new Error('OTP_FROM_EMAIL is required in production');
+  if (!env.OTP_HASH_SECRET) throw new Error('OTP_HASH_SECRET is required in production');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

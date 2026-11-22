@@ -16,7 +16,8 @@ const blankListing = {
   description: '',
   minimumIncrement: '10',
   durationHours: '24',
-  imageUrl: ''
+  imageUrl: '',
+  storagePath: ''
 };
 
 export function FishermanInventoryScreen() {
@@ -170,6 +171,7 @@ export function FishermanInventoryScreen() {
       try {
         const uploaded = await mobileApi.uploadImage(photo);
         updateField('imageUrl', uploaded.imageUrl);
+        updateField('storagePath', uploaded.storagePath || '');
       } catch (uploadError) {
         setError(uploadError.message);
       } finally {
@@ -211,7 +213,8 @@ export function FishermanInventoryScreen() {
         salePrice: price,
         saleMode,
         description: form.description.trim(),
-        imageUrl: form.imageUrl
+        imageUrl: form.imageUrl,
+        storagePath: form.storagePath
       });
       if (saleMode === 'bid') {
         try {

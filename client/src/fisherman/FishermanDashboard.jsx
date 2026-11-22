@@ -8,7 +8,7 @@ import ReputationPanel from '../ReputationPanel.jsx';
 import { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
 
-const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
+const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', storagePath: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
 export default function FishermanDashboard({ initialView = 'inventory', onViewChange }) {
   const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null); const [chatAuction, setChatAuction] = useState(null);
@@ -69,7 +69,7 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
     }
     try {
       const uploaded = await api.uploadFishImage(file);
-      setForm(current => ({ ...current, imageUrl: uploaded.imageUrl, fishType: prediction?.fish || current.fishType }));
+      setForm(current => ({ ...current, imageUrl: uploaded.imageUrl, storagePath: uploaded.storagePath || '', fishType: prediction?.fish || current.fishType }));
       if (prediction) {
         const confidence = (prediction.confidence * 100).toFixed(1);
         const otherMatches = alternatives.map(item => `${item.fish} (${(item.confidence * 100).toFixed(1)}%)`).join(', ');

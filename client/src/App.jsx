@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Activity, ClipboardList, Eye, EyeOff, Fish, Gavel, LogIn, LogOut, Mail, MapPin, Menu, ReceiptText, ShipWheel, ShoppingBag, Store, UserRound, Users, X } from 'lucide-react';
 import { api } from './api.js';
 import UserApp from './user/UserApp.jsx';
@@ -14,7 +14,11 @@ export default function App() {
 
   const auth = async form => {
     const result = authMode === 'login' ? await api.login(form) : await api.register(form);
-    if (result.status === 'pending') throw new Error(result.message);
+    if (result.status === 'pending') return result;
+    completeAuthentication(result);
+  };
+  const completeAuthentication = result => {
+    if (!result?.token) return;
     localStorage.setItem('tide_token', result.token);
     localStorage.setItem('tide_user', JSON.stringify(result.user));
     setUser(result.user);
@@ -45,7 +49,7 @@ export default function App() {
     </header>
     {rolePage}
     {showProfile && user && <ProfileDialog user={user} onClose={() => setShowProfile(false)} onLogout={() => { logout(); setShowProfile(false); }} onNavigate={view => { setFishermanView(view); setShowProfile(false); }} />}
-    {authMode && <AuthModal mode={authMode} onClose={() => setAuthMode(null)} onSwitch={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} onSubmit={auth} />}
+    {authMode && <AuthModal mode={authMode} onClose={() => setAuthMode(null)} onSwitch={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} onSubmit={auth} onAuthenticated={completeAuthentication} />}
   </>;
 }
 function ProfileDialog({ user, onClose, onLogout, onNavigate }) {
@@ -100,51 +104,111 @@ function ProfileDialog({ user, onClose, onLogout, onNavigate }) {
     </section>
   </div>;
 }
-function AuthModal({ mode, onClose, onSwitch, onSubmit }) {
+function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
+  const [pending, setPending] = useState(null);
+  const [otp, setOtp] = useState('');
+  const [seconds, setSeconds] = useState(0);
+  const [submittingOtp, setSubmittingOtp] = useState(false);
+  const [resending, setResending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const change = event => setForm({ ...form, [event.target.name]: event.target.value });
-  const submit = event => {
+  useEffect(() => {
+    if (!seconds) return undefined;
+    const timer = window.setInterval(() => setSeconds(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [seconds]);
+  const submit = async event => {
     event.preventDefault();
-    onSubmit(form).catch(err => setError(err.message));
+    setError('');
+    try {
+      const result = await onSubmit(form);
+      if (result?.status === 'pending') {
+        setPending(result);
+        setSeconds(60);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const verifyOtp = async event => {
+    event.preventDefault();
+    setError('');
+    if (!/^\d{6}$/.test(otp)) {
+      setError('Enter the 6-digit verification code.');
+      return;
+    }
+    setSubmittingOtp(true);
+    try {
+      const result = await api.verifyOtp({ email: pending.email, otp });
+      if (result.status === 'pending') {
+        setPending(null);
+        setOtp('');
+        setError(result.message);
+        return;
+      }
+      onAuthenticated(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmittingOtp(false);
+    }
+  };
+  const resendOtp = async () => {
+    setError('');
+    setResending(true);
+    try {
+      const result = await api.resendOtp({ email: pending.email });
+      setSeconds(60);
+      setOtp('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResending(false);
+    }
   };
 
   return <div className="modal-backdrop" onClick={onClose}>
     <div className="modal auth-modal" onClick={event => event.stopPropagation()}>
       <button className="close" onClick={onClose}>×</button>
       <p className="kicker">TIDEMARKET ACCOUNT</p>
-      <h2>{mode === 'login' ? 'Welcome back to the water.' : 'Create your buyer account.'}</h2>
-      <form onSubmit={submit} autoComplete="on">
-        {mode === 'register' && <input name="name" placeholder="Full name" autoComplete="name" onChange={change} required />}
-        <input name="email" type="email" placeholder="Email address" autoComplete="username" onChange={change} required />
-        <div className="password-field">
-          <input
-            name="password"
-            type={showPassword ? 'text' : 'password'}
-            placeholder="Password"
-            onChange={change}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
-            minLength={mode === 'register' ? 8 : undefined}
-          />
-          <button
-            className="password-toggle"
-            type="button"
-            aria-label={showPassword ? 'Hide password' : 'Show password'}
-            aria-pressed={showPassword}
-            onClick={() => setShowPassword(visible => !visible)}
-          >
-            {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
-          </button>
-        </div>
-        {error && <p className="form-error">{error}</p>}
-        <button className="button primary full" type="submit">{mode === 'login' ? 'Log in' : 'Create buyer account'}</button>
-      </form>
-        <p className="switch-auth-prompt">
-          {mode === 'login' ? 'New to TideMarket?' : 'Already have an account?'}
-          <button className="switch-auth" onClick={onSwitch}>{mode === 'login' ? 'Sign up' : 'Log in'}</button>
-        </p>
+      {pending ? <>
+        <h2>Verify your email.</h2>
+        <p>Enter the 6-digit code sent to {pending.email.replace(/(^.).*(@.*$)/, '$1•••$2')}.</p>
+        <form onSubmit={verifyOtp} autoComplete="one-time-code">
+          <input name="otp" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="6-digit code" value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} required />
+          {error && <p className="form-error">{error}</p>}
+          {seconds <= 0 ? <button className="switch-auth" type="button" onClick={resendOtp} disabled={resending}>{resending ? 'Sending…' : 'Resend OTP'}</button> : <p>Resend available in {seconds}s</p>}
+          <button className="button primary full" type="submit" disabled={submittingOtp}>{submittingOtp ? 'Verifying…' : 'Verify email'}</button>
+        </form>
+      </> : <>
+        <h2>{mode === 'login' ? 'Welcome back to the water.' : 'Create your account.'}</h2>
+        <form onSubmit={submit} autoComplete="on">
+          {mode === 'register' && <>
+            <input name="name" placeholder="Full name" autoComplete="name" onChange={change} required />
+            <input name="phone" placeholder="Mobile number" autoComplete="tel" onChange={change} />
+            <select name="role" value={form.role || ''} onChange={change} required>
+              <option value="" disabled>Select account role</option>
+              <option value="buyer">Buyer</option>
+              <option value="fisherman">Fisherman</option>
+            </select>
+          </>}
+          <input name="email" type="email" placeholder="Email address" autoComplete="username" onChange={change} required />
+          <div className="password-field">
+            <input name="password" type={showPassword ? 'text' : 'password'} placeholder="Password" onChange={change} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} />
+            <button className="password-toggle" type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword(visible => !visible)}>
+              {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
+            </button>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+          <button className="button primary full" type="submit">{mode === 'login' ? 'Log in' : 'Create account'}</button>
+        </form>
+      </>}
+      <p className="switch-auth-prompt">
+        {mode === 'login' ? 'New to TideMarket?' : 'Already have an account?'}
+        <button className="switch-auth" onClick={onSwitch}>{mode === 'login' ? 'Sign up' : 'Log in'}</button>
+      </p>
     </div>
   </div>;
 }

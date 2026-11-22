@@ -43,6 +43,12 @@ before(async () => {
   process.env.RAZORPAY_KEY_ID = '';
   process.env.RAZORPAY_KEY_SECRET = '';
   process.env.RAZORPAY_WEBHOOK_SECRET = '';
+  process.env.RESEND_API_KEY = 'test-resend-key';
+  process.env.OTP_FROM_EMAIL = 'Fishing Bid <test@example.test>';
+  process.env.OTP_HASH_SECRET = 'test-only-otp-secret';
+  const emailService = await import('../src/emailService.js');
+  emailService.setEmailSenderForTests(async payload => ({ data: { id: 'test-email' }, error: null }));
+  process.env.NODE_ENV = 'test';
   await createAuctionDatabase(process.env.TIDEMARKET_LOCAL_DB_PATH);
   const { startServer } = await import('../src/index.js');
   serverHandle = await startServer({ port: 0, sweepIntervalMs: 60_000 });
@@ -69,7 +75,7 @@ test('buyer registration validates name, email, and password before creating a p
 
   const valid = await api('/auth/register', {
     method: 'POST',
-    body: { name: 'New Buyer', email: 'New-Buyer@example.test', password: 'StrongPass123!' }
+    body: { name: 'New Buyer', email: 'New-Buyer@example.test', password: 'StrongPass123!', role: 'buyer' }
   });
   assert.equal(valid.response.status, 202);
   assert.equal(valid.data.status, 'pending');

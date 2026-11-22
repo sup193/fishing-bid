@@ -4,10 +4,12 @@ import multer from 'multer';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomUUID } from 'node:crypto';
-import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
+import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, consumePendingRegistration, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -17,20 +19,15 @@ import { makePricePrediction, normalizePredictionInput } from '../pricePredictio
 import { analyzeAuctionActivity, buildAuctionInsights } from '../auctionInsights.js';
 import { applyAuctionOffer, auctionBidderIds, minimumBidFor, publicAuction, recalculateAuctionOffers } from '../auctionBidding.js';
 import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
+import { sendOtpEmail } from '../emailService.js';
 
 const router = express.Router();
 const execFileAsync = promisify(execFile);
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../');
-const uploadDir = resolve(process.env.TIDEMARKET_UPLOAD_DIR || resolve(projectRoot, 'server/uploads'));
-fs.mkdirSync(uploadDir, { recursive: true });
-const imageExtensions = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: uploadDir,
-    filename: (req, file, callback) => callback(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${imageExtensions[file.mimetype] || ''}`)
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, callback) => callback(null, Boolean(imageExtensions[file.mimetype]))
+  fileFilter: (req, file, callback) => callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype))
 });
 const imageUpload = (req, res, next) => upload.single('image')(req, res, error => {
   if (!error) return next();
@@ -63,6 +60,57 @@ const publicUser = user => ({
   email: user.email,
   role: user.role
 });
+
+const otpRateLimits = new Map();
+const otpIpLimits = new Map();
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
+function normalizeOtpEmail(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function otpSecret() {
+  if (process.env.OTP_HASH_SECRET) return process.env.OTP_HASH_SECRET;
+  if (process.env.NODE_ENV === 'production') throw new Error('OTP_HASH_SECRET is required in production');
+  return 'dev-only-otp-secret-change-before-production';
+}
+
+function hashOtp(email, otp) {
+  return createHmac('sha256', otpSecret()).update(`${normalizeOtpEmail(email)}:${otp}`).digest('hex');
+}
+
+function generateOtp() {
+  if (process.env.NODE_ENV === 'test') return globalThis.__tidemarketOtpSequence === undefined
+    ? (globalThis.__tidemarketOtpSequence = 123456, '123456')
+    : (globalThis.__tidemarketOtpSequence = 654321, '654321');
+  return String(randomInt(100000, 1000000));
+}
+
+function checkOtpRateLimit(req, email) {
+  const now = Date.now();
+  const emailKey = normalizeOtpEmail(email);
+  const emailLimit = otpRateLimits.get(emailKey);
+  if (emailLimit && emailLimit.resetAt > now && emailLimit.count >= 5) {
+    const error = new Error('Too many registration attempts for this email. Try again later.');
+    error.status = 429;
+    throw error;
+  }
+  if (!emailLimit || emailLimit.resetAt <= now) otpRateLimits.set(emailKey, { count: 1, resetAt: now + 15 * 60 * 1000 });
+  else emailLimit.count += 1;
+
+  const ip = req.ip || 'unknown';
+  const ipLimit = otpIpLimits.get(ip);
+  if (ipLimit && ipLimit.resetAt > now && ipLimit.count >= 20) {
+    const error = new Error('Too many registration attempts from this network. Try again later.');
+    error.status = 429;
+    throw error;
+  }
+  if (!ipLimit || ipLimit.resetAt <= now) otpIpLimits.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+  else ipLimit.count += 1;
+}
+
+
 const fishermanFor = async id => sanitizeUser(await get('users', id));
 const listingView = async (listing, reputation = undefined) => {
   const auction = (await list('auctions')).find(item => item.listing === listing.id) || null;
@@ -352,27 +400,158 @@ async function markPaymentPaid(transaction, payment) {
 
 router.post('/auth/register', async (req, res) => {
   try {
+    checkOtpRateLimit(req, req.body.email);
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-    const normalizedEmail = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const email = normalizeOtpEmail(req.body.email);
     const password = typeof req.body.password === 'string' ? req.body.password : '';
-    if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-      || password.length < 8 || password.length > 128) {
-      return res.status(400).json({ message: 'Use a valid name and email, and a password between 8 and 128 characters' });
-    }
-    if ((await list('users')).some(user => user.email === normalizedEmail)) {
-      return res.status(400).json({ message: 'Email is already registered' });
-    }
-    const existingRequest = (await list('registrationRequests')).find(item => item.email === normalizedEmail && item.status === 'pending');
-    if (existingRequest) return res.status(409).json({ message: 'Your registration request is still pending admin approval.', status: 'pending' });
+    const role = req.body.role === 'fisherman' ? 'fisherman' : req.body.role === 'buyer' ? 'buyer' : '';
     const phone = typeof req.body.phone === 'string' ? req.body.phone.trim().slice(0, 30) : '';
     const location = typeof req.body.location === 'string' ? req.body.location.trim().slice(0, 120) : '';
-    const request = { name, email: normalizedEmail, passwordHash: await bcrypt.hash(password, 12), role: 'buyer', status: 'pending' };
-    if (phone) request.phone = phone;
-    if (location) request.location = location;
-    await insert('registrationRequests', request);
-    res.status(202).json({ status: 'pending', message: 'Registration submitted. An admin must approve your account before you can sign in.' });
+    if (!name || name.length > 100
+      || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      || password.length < 8 || password.length > 128
+      || !role) {
+      return res.status(400).json({ message: 'Use a valid name and email, role, and password between 8 and 128 characters' });
+    }
+    const users = await list('users');
+    if (users.some(user => String(user.email).toLowerCase() === email)) {
+      return res.status(409).json({ message: 'Email is already registered' });
+    }
+    if (phone && users.some(user => String(user.phone || '').trim() === phone)) {
+      return res.status(409).json({ message: 'Phone number is already registered' });
+    }
+    const pendingRequests = role === 'buyer'
+      ? (await list('registrationRequests')).filter(request => request.status === 'pending')
+      : [];
+    if (pendingRequests.some(request => String(request.email).toLowerCase() === email)) {
+      return res.status(409).json({ message: 'A registration request is already pending for this email.', status: 'pending' });
+    }
+    if (phone && pendingRequests.some(request => String(request.phone || '').trim() === phone)) {
+      return res.status(409).json({ message: 'Phone number is already used by a pending registration.' });
+    }
+    const existingPending = await getPendingRegistration(email);
+    if (existingPending) return res.status(409).json({
+      status: 'pending',
+      message: 'A verification code is already pending for this email.',
+      email,
+      expiresAt: existingPending.expiresAt
+    });
+    const passwordHash = await bcrypt.hash(password, 12);
+    const otp = generateOtp();
+    const now = new Date();
+    const pendingId = `pending_${randomUUID()}`;
+    try {
+      await insert('pendingRegistrations', {
+        name,
+        email,
+        phone,
+        location,
+        passwordHash,
+        role,
+        otpHash: hashOtp(email, otp),
+        expiresAt: new Date(now.getTime() + OTP_TTL_MS).toISOString(),
+        attempts: 0,
+        lastSentAt: now.toISOString()
+      }, pendingId);
+      await sendOtpEmail({ name, email, otp });
+    } catch (error) {
+      await remove('pendingRegistrations', pendingId);
+      throw error.status ? error : Object.assign(new Error('Could not send the verification email'), { status: 502 });
+    }
+    return res.status(202).json({
+      status: 'pending',
+      message: 'Verification code sent.',
+      email,
+      expiresAt: new Date(now.getTime() + OTP_TTL_MS).toISOString()
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(error.status || 400).json({ message: error.message });
+  }
+});
+router.post('/auth/verify-otp', async (req, res) => {
+  try {
+    const email = normalizeOtpEmail(req.body.email);
+    const otp = typeof req.body.otp === 'string' ? req.body.otp.trim() : '';
+    if (!email || !/^\d{6}$/.test(otp)) {
+      return res.status(400).json({ message: 'Provide a valid email and six-digit verification code' });
+    }
+    const pending = await getPendingRegistration(email);
+    if (!pending) return res.status(404).json({ message: 'No pending registration found' });
+    if (Date.parse(pending.expiresAt) <= Date.now()) {
+      return res.status(410).json({ message: 'Verification code has expired. Request a new code.' });
+    }
+    if (Number(pending.attempts || 0) >= 5) {
+      return res.status(429).json({ message: 'Maximum verification attempts reached. Request a new code.' });
+    }
+    const result = await consumePendingRegistration({
+      email,
+      otpHash: hashOtp(email, otp),
+      userId: `user_${randomUUID()}`
+    });
+    if (result.status === 'expired') return res.status(410).json({ message: 'Verification code has expired. Request a new code.' });
+    if (result.status === 'locked') return res.status(429).json({ message: 'Maximum verification attempts reached. Request a new code.' });
+    if (result.status === 'incorrect') return res.status(400).json({ message: 'Incorrect verification code', remainingAttempts: result.remainingAttempts });
+    if (result.status === 'duplicate') return res.status(409).json({ message: 'Email is already registered or awaiting approval' });
+    if (result.status === 'pending_admin') {
+      return res.status(202).json({
+        status: 'pending',
+        message: 'Registration verified. An admin must approve your buyer account before you can sign in.',
+        email
+      });
+    }
+    if (result.status !== 'verified') return res.status(400).json({ message: 'Verification could not be completed' });
+    const user = await get('users', result.userId);
+    if (!user) return res.status(500).json({ message: 'Account creation could not be completed' });
+    return res.status(201).json({ token: signUser(user), user: publicUser(user) });
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
+  }
+});
+router.post('/auth/resend-otp', async (req, res) => {
+  try {
+    checkOtpRateLimit(req, req.body.email);
+    const email = normalizeOtpEmail(req.body.email);
+    const pending = await getPendingRegistration(email);
+    if (!pending) return res.status(404).json({ message: 'No pending registration found' });
+    const elapsed = Date.now() - Date.parse(pending.lastSentAt || 0);
+    if (elapsed < OTP_RESEND_COOLDOWN_MS) {
+      const retryAfter = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ message: 'Please wait before requesting another code.', retryAfter });
+    }
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
+    const updates = {
+      otpHash: hashOtp(email, otp),
+      expiresAt,
+      attempts: 0,
+      lastSentAt: new Date().toISOString(),
+      verifiedAt: null,
+      consumedAt: null
+    };
+    if (process.env.TIDEMARKET_DATABASE === 'local' || (!process.env.SUPABASE_URL && !process.env.SUPABASE_SECRET_KEY)) {
+      await update('pendingRegistrations', pending.id, updates);
+    } else {
+      const { error } = await initSupabase().from('pending_registrations')
+        .update(updates)
+        .eq('id', pending.id);
+      if (error) throw error;
+    }
+    try {
+      await sendOtpEmail({ name: pending.name, email, otp });
+    } catch (error) {
+      if (process.env.TIDEMARKET_DATABASE === 'local' || (!process.env.SUPABASE_URL && !process.env.SUPABASE_SECRET_KEY)) {
+        await update('pendingRegistrations', pending.id, { otpHash: pending.otpHash, expiresAt: pending.expiresAt, attempts: pending.attempts, lastSentAt: pending.lastSentAt });
+      } else {
+        await initSupabase().from('pending_registrations')
+          .update({ otpHash: pending.otpHash, expiresAt: pending.expiresAt, attempts: pending.attempts, lastSentAt: pending.lastSentAt })
+          .eq('id', pending.id);
+      }
+      throw error;
+    }
+    return res.json({ status: 'pending', message: 'A new verification code was sent.', email, expiresAt });
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
   }
 });
 router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed' }); } });
@@ -388,21 +567,29 @@ router.get('/fishermen/:id/reputation', async (req, res) => {
   if (!reputation) return res.status(404).json({ message: 'Fisherman profile not found' });
   res.json(reputation);
 });
-router.post('/uploads/image', requireAuth, allow('fisherman'), imageUpload, (req, res) => {
+router.post('/uploads/image', requireAuth, allow('fisherman'), imageUpload, async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Upload a JPG, PNG, or WEBP fish image' });
-  res.status(201).json({ imageUrl: `/uploads/${req.file.filename}` });
+  try {
+    const uploaded = await uploadFishImage(req.file.buffer, req.file.mimetype, req.user.id);
+    res.status(201).json(uploaded);
+  } catch (error) {
+    console.error('Fish image upload failed:', error);
+    res.status(502).json({ message: 'Could not store the fish image' });
+  }
 });
 router.post('/fish-detection', limitFishDetection, imageUpload, async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Upload a JPG, PNG, or WEBP fish image' });
   const script = resolve(projectRoot, 'predict.py');
   const model = resolve(projectRoot, 'server/models/fish_classifier.keras');
   const labels = resolve(projectRoot, 'server/models/fish_labels.json');
+  const temporaryPath = path.join(os.tmpdir(), `tidemarket-detect-${randomUUID()}${req.file.mimetype === 'image/png' ? '.png' : req.file.mimetype === 'image/webp' ? '.webp' : '.jpg'}`);
   try {
+    fs.writeFileSync(temporaryPath, req.file.buffer);
     const modelIsPointer = fs.existsSync(model) && fs.statSync(model).size < 256 && fs.readFileSync(model, 'utf8').startsWith('version https://git-lfs.github.com/spec/v1');
     if (!fs.existsSync(model) || modelIsPointer) {
       return res.status(503).json({ message: 'Species identification is not set up: the fish classifier model weights are missing. Install the model file and Python/TensorFlow requirements to enable photo detection.' });
     }
-    const { stdout } = await execFileAsync(process.env.PYTHON_EXECUTABLE || 'python', [script, '--image', req.file.path, '--model', model, '--labels', labels], {
+    const { stdout } = await execFileAsync(process.env.PYTHON_EXECUTABLE || 'python', [script, '--image', temporaryPath, '--model', model, '--labels', labels], {
       cwd: projectRoot,
       timeout: 120000,
       maxBuffer: 1024 * 1024
@@ -415,7 +602,7 @@ router.post('/fish-detection', limitFishDetection, imageUpload, async (req, res)
     console.error('Fish image detection failed:', error.stderr || error.message);
     res.status(500).json({ message: 'Could not identify species from this image. Try a clear photo of one fish.' });
   } finally {
-    fs.rmSync(req.file.path, { force: true });
+    fs.rmSync(temporaryPath, { force: true });
   }
 });
 router.get('/market/trends', async (req, res) => {
@@ -526,6 +713,7 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
   const saleMode = req.body.saleMode || 'sale';
   const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
   const imageUrl = typeof req.body.imageUrl === 'string' ? req.body.imageUrl : undefined;
+  const imagePath = typeof req.body.storagePath === 'string' ? req.body.storagePath : undefined;
   const requestId = req.body.requestId;
   if (!FISH_TYPES.includes(fishType) || !Number.isFinite(quantity) || quantity <= 0
     || !QUALITIES.includes(quality) || !SIZES.includes(size) || !location
@@ -597,6 +785,16 @@ router.post('/listings', requireAuth, allow('fisherman'), async (req, res) => {
     listing = { id, ...listing };
   } else {
     listing = await insert('listings', fields);
+  }
+  if (imageUrl && imagePath) {
+    await insert('listingImages', {
+      listing: listing.id,
+      storagePath: imagePath,
+      imageUrl,
+      position: 0,
+      contentType: 'image',
+      isPrimary: true
+    });
   }
   res.status(201).json(listing);
 });

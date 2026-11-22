@@ -11,7 +11,6 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-auction-api-')
 const databasePath = path.join(tempDir, 'local-db.json');
 process.env.TIDEMARKET_DATABASE = 'local';
 process.env.TIDEMARKET_LOCAL_DB_PATH = databasePath;
-process.env.TIDEMARKET_UPLOAD_DIR = path.join(tempDir, 'uploads');
 process.env.JWT_SECRET = 'test-only-auction-jwt-secret';
 process.env.ADMIN_EMAIL = 'admin@auction.test';
 process.env.ADMIN_PASSWORD = 'auction-test-password';
@@ -21,8 +20,11 @@ process.env.PORT = process.env.PORT || '5000';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_fixture';
 process.env.RAZORPAY_KEY_SECRET = 'test-only-e2e-razorpay-secret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'test-only-e2e-webhook-secret';
+process.env.RESEND_API_KEY = 'test-only-resend-key';
+process.env.OTP_FROM_EMAIL = 'Fishing Bid <test@example.test>';
+process.env.OTP_HASH_SECRET = 'test-only-otp-secret';
 delete process.env.SUPABASE_URL;
-delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+delete process.env.SUPABASE_SECRET_KEY;
 await createAuctionDatabase(databasePath);
 const database = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
 database.reviews = {
@@ -75,5 +77,7 @@ globalThis.fetch = async (input, options = {}) => {
   throw new Error(`Unexpected Razorpay test request: ${method} ${url.pathname}`);
 };
 process.on('exit', () => fs.rmSync(tempDir, { recursive: true, force: true }));
+const emailService = await import('../src/emailService.js');
+emailService.setEmailSenderForTests(async payload => ({ data: { id: 'test-email' }, error: null }));
 const { startServer } = await import('../src/index.js');
 await startServer();

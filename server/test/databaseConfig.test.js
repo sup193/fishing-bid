@@ -6,7 +6,7 @@ const environmentKeys = [
   'NODE_ENV',
   'TIDEMARKET_DATABASE',
   'SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY'
+  'SUPABASE_SECRET_KEY'
 ];
 
 function withEnvironment(values, callback) {
@@ -36,6 +36,23 @@ test('production refuses to start with incomplete Supabase credentials', () => {
     NODE_ENV: 'production',
     SUPABASE_URL: 'https://jrgkxtlcuakxvdkqygxs.supabase.co'
   }, () => {
-    assert.throws(() => initSupabase(), /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required|Set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/);
+    assert.throws(() => initSupabase(), /SUPABASE_URL and SUPABASE_SECRET_KEY are required|Set both SUPABASE_URL and SUPABASE_SECRET_KEY/);
+  });
+});
+
+test('Supabase refuses placeholder and publishable secret keys', () => {
+  withEnvironment({
+    NODE_ENV: 'production',
+    SUPABASE_URL: 'https://jrgkxtlcuakxvdkqygxs.supabase.co',
+    SUPABASE_SECRET_KEY: 'replace-with-your-backend-only-supabase-secret-key'
+  }, () => {
+    assert.throws(() => initSupabase(), /placeholder/i);
+  });
+  withEnvironment({
+    NODE_ENV: 'production',
+    SUPABASE_URL: 'https://jrgkxtlcuakxvdkqygxs.supabase.co',
+    SUPABASE_SECRET_KEY: 'sb_publishable_not_a_secret'
+  }, () => {
+    assert.throws(() => initSupabase(), /publishable key/i);
   });
 });

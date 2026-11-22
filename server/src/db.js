@@ -1,15 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+const backendDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const serverEnvPath = path.resolve(backendDirectory, '.env');
+const rootEnvPath = path.resolve(backendDirectory, '../.env');
+dotenv.config({ path: serverEnvPath, override: false });
+dotenv.config({ path: rootEnvPath, override: false });
+
 const localDbPath = path.resolve(process.env.TIDEMARKET_LOCAL_DB_PATH
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/local-db.json'));
 export const TABLES = Object.freeze({
   users: 'users',
+  pendingRegistrations: 'pending_registrations',
   listings: 'listings',
+  listingImages: 'listing_images',
   auctions: 'auctions',
   bids: 'bids',
   orders: 'orders',
@@ -29,8 +38,10 @@ export const TABLES = Object.freeze({
 });
 const fields = Object.freeze({
   users: ['name', 'email', 'passwordHash', 'role', 'phone', 'location', 'verificationStatus', 'verificationUpdatedAt', 'verificationUpdatedBy', 'demo'],
+  pendingRegistrations: ['name', 'email', 'phone', 'location', 'passwordHash', 'role', 'otpHash', 'expiresAt', 'attempts', 'lastSentAt', 'verifiedAt', 'consumedAt'],
   registrationRequests: ['name', 'email', 'passwordHash', 'role', 'phone', 'location', 'status', 'reviewedAt', 'reviewedBy'],
-  listings: ['fisherman', 'fishType', 'quality', 'size', 'quantity', 'location', 'price', 'expectedPrice', 'salePrice', 'saleMode', 'description', 'imageUrl', 'imageVerification', 'status', 'reservedBy', 'predictedLow', 'predictedHigh', 'pricePrediction', 'removedAt', 'removedBy', 'demo'],
+  listings: ['fisherman', 'fishType', 'quality', 'size', 'quantity', 'location', 'freshness', 'price', 'expectedPrice', 'salePrice', 'saleMode', 'description', 'imageUrl', 'imageVerification', 'status', 'reservedBy', 'predictedLow', 'predictedHigh', 'pricePrediction', 'removedAt', 'removedBy', 'demo'],
+  listingImages: ['listing', 'storagePath', 'imageUrl', 'position', 'contentType', 'metadata', 'isPrimary'],
   auctions: ['listing', 'startPrice', 'currentPrice', 'minimumIncrement', 'currentBidder', 'bidCount', 'startTime', 'endTime', 'status', 'winner', 'winningBid', 'result', 'closedAt', 'closingNoticeSentAt', 'closureNotificationsSent', 'cancelledBy', 'order', 'bidderOffers', 'autoBids', 'bidHistory', 'processedRequests', 'offerSequence', 'demo'],
   bids: ['auction', 'buyer', 'amount', 'type', 'riskReviewNeeded', 'riskFlags', 'demo'],
   orders: ['orderNumber', 'auction', 'listing', 'buyer', 'fisherman', 'quantity', 'amount', 'paymentStatus', 'orderStatus', 'purchaseType', 'paymentMethod', 'gateway', 'gatewayOrderId', 'transactionRef', 'address', 'expectedDeliveryAt', 'deliveredAt', 'paidAt', 'cancellationActor', 'demo'],
@@ -53,17 +64,27 @@ let client;
 function databaseMode() {
   const requested = process.env.TIDEMARKET_DATABASE;
   const hasUrl = Boolean(process.env.SUPABASE_URL);
-  const hasKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const hasKey = Boolean(process.env.SUPABASE_SECRET_KEY);
+  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
+  const placeholderSecret = !secret
+    || /replace-with|your_|placeholder/i.test(secret);
+  const publishableSecret = /^sb_publishable_/i.test(secret || '');
 
   if (requested === 'local') {
     if (process.env.NODE_ENV === 'production') throw new Error('The local database cannot be used in production');
     return 'local';
   }
   if (requested && requested !== 'supabase') throw new Error(`Unsupported TIDEMARKET_DATABASE value: ${requested}`);
-  if (hasUrl !== hasKey) throw new Error('Set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to use Supabase');
+  if (hasUrl !== hasKey) throw new Error('Set both SUPABASE_URL and SUPABASE_SECRET_KEY to use Supabase');
+  if ((hasUrl || hasKey) && placeholderSecret) {
+    throw new Error('SUPABASE_SECRET_KEY is missing or still contains a placeholder');
+  }
+  if (publishableSecret) {
+    throw new Error('SUPABASE_SECRET_KEY must be a secret key, not a publishable key');
+  }
   if (hasUrl && hasKey) return 'supabase';
   if (requested === 'supabase' || process.env.NODE_ENV === 'production') {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+    throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY are required');
   }
   return 'local';
 }
@@ -75,13 +96,136 @@ export function isLocalDatabase() {
 export function initSupabase() {
   if (databaseMode() === 'local') return null;
   if (!client) {
-    client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { 'X-Client-Info': 'tidemarket-api' } }
     });
   }
   return client;
 }
+
+export async function uploadFishImage(buffer, mimetype, ownerId) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Fish image content is required');
+  if (isLocalDatabase()) {
+    return {
+      storagePath: null,
+      imageUrl: `data:${mimetype};base64,${buffer.toString('base64')}`
+    };
+  }
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[mimetype];
+  if (!extension) throw new Error('Unsupported fish image type');
+  const storagePath = `listings/${ownerId || 'anonymous'}/${crypto.randomUUID()}.${extension}`;
+  const supabase = initSupabase();
+  const { error } = await supabase.storage.from('fish-images').upload(storagePath, buffer, {
+    contentType: mimetype,
+    cacheControl: '3600',
+    upsert: false
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from('fish-images').getPublicUrl(storagePath);
+  return { storagePath, imageUrl: data.publicUrl };
+}
+
+export async function getPendingRegistration(email) {
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    return Object.entries(store.pendingRegistrations || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.email === email.trim().toLowerCase() && !item.consumedAt)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0] || null;
+  }
+  const { data, error } = await initSupabase().from('pending_registrations')
+    .select('*')
+    .ilike('email', email.trim().toLowerCase())
+    .is('consumedAt', null)
+    .order('createdAt', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeRow(data);
+}
+
+export async function consumePendingRegistration({ email, otpHash, userId }) {
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const pending = Object.entries(store.pendingRegistrations || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.email === email.trim().toLowerCase() && !item.consumedAt)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0];
+    if (!pending) return { status: 'invalid', reason: 'pending_not_found' };
+    if (Date.parse(pending.expiresAt) <= Date.now()) return { status: 'expired' };
+    if (Number(pending.attempts || 0) >= 5) return { status: 'locked' };
+    if (pending.otpHash !== otpHash) {
+      const attempts = Number(pending.attempts || 0) + 1;
+      store.pendingRegistrations[pending.id].attempts = attempts;
+      store.pendingRegistrations[pending.id].updatedAt = new Date().toISOString();
+      writeLocalDb(store);
+      return { status: 'incorrect', remainingAttempts: Math.max(0, 5 - attempts) };
+    }
+    const users = store.users || {};
+    const registrationRequests = store.registrationRequests || {};
+    if (Object.values(users).some(user => String(user.email).toLowerCase() === pending.email)
+      || Object.values(registrationRequests).some(request => String(request.email).toLowerCase() === pending.email && request.status === 'pending')) {
+      store.pendingRegistrations[pending.id].consumedAt = new Date().toISOString();
+      writeLocalDb(store);
+      return { status: 'duplicate' };
+    }
+    const now = new Date().toISOString();
+    if (pending.role === 'buyer') {
+      registrationRequests[`registration_${crypto.randomUUID()}`] = {
+        name: pending.name,
+        email: pending.email,
+        passwordHash: pending.passwordHash,
+        role: 'buyer',
+        phone: pending.phone,
+        location: pending.location,
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now
+      };
+      store.registrationRequests = registrationRequests;
+    } else {
+      users[userId] = {
+        name: pending.name,
+        email: pending.email,
+        passwordHash: pending.passwordHash,
+        role: 'fisherman',
+        phone: pending.phone,
+        location: pending.location,
+        verificationStatus: 'unverified',
+        demo: false,
+        createdAt: now,
+        updatedAt: now
+      };
+      store.users = users;
+    }
+    store.pendingRegistrations[pending.id].verifiedAt = now;
+    store.pendingRegistrations[pending.id].consumedAt = now;
+    store.pendingRegistrations[pending.id].updatedAt = now;
+    writeLocalDb(store);
+    if (pending.role === 'buyer') {
+      return { status: 'pending_admin', email: pending.email, name: pending.name, role: 'buyer' };
+    }
+    return {
+      status: 'verified',
+      userId,
+      name: pending.name,
+      email: pending.email,
+      role: 'fisherman',
+      phone: pending.phone,
+      location: pending.location
+    };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_consume_registration_otp', {
+    p_email: email.trim().toLowerCase(),
+    p_otp_hash: otpHash,
+    p_user_id: userId,
+    p_now: new Date().toISOString()
+  });
+  if (error) throw error;
+  return data;
+}
+
 
 export function makeId(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -130,7 +274,7 @@ export function toDatabaseRecord(collection, record, previousLegacyData = {}) {
     if (allowed.has(key)) result[key] = value;
     else legacyData[key] = value;
   }
-  result.legacyData = legacyData;
+  if (collection !== 'pendingRegistrations') result.legacyData = legacyData;
   return result;
 }
 

@@ -6,8 +6,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "seed:demo": "node src/seed-demo.js",
-    "migration:export-firebase": "node scripts/export-firebase.mjs",
-    "migration:import-firebase": "node scripts/import-firebase.mjs",
+    "check:live-supabase": "node scripts/live-supabase-check.mjs",
     "test": "node --test"
   },
   "dependencies": {
@@ -19,6 +18,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "resend": "^6.39.0"
   }
 }

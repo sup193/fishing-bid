@@ -7,7 +7,7 @@ const serverDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(serverDirectory, '../../');
 dotenv.config({ path: resolve(projectRoot, '.env') });
 
-const supabaseConfigured = Boolean(process.env.SUPABASE_URL || process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabaseConfigured = Boolean(process.env.SUPABASE_URL || process.env.SUPABASE_SECRET_KEY);
 const useLocalDatabase = process.argv.includes('--local');
 const allowSupabase = process.argv.includes('--allow-supabase');
 const resetActivity = process.argv.includes('--reset-activity');
@@ -19,8 +19,8 @@ if (useLocalDatabase) process.env.TIDEMARKET_DATABASE = 'local';
 if (supabaseConfigured && !allowSupabase && !useLocalDatabase) {
   throw new Error('Supabase credentials are configured. Use --local to seed local demo data or --allow-supabase only if you intend to add demo records to Supabase.');
 }
-if (allowSupabase && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)) {
-  throw new Error('Supabase was requested but SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not both configured.');
+if (allowSupabase && (!process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY)) {
+  throw new Error('Supabase was requested but SUPABASE_URL and SUPABASE_SECRET_KEY are not both configured.');
 }
 if (resetActivity && !useLocalDatabase && !allowSupabase) {
   throw new Error('Activity reset requires an explicit --local or --allow-supabase target.');

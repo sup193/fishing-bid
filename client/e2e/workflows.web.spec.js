@@ -23,11 +23,14 @@ test('buyer registration, admin approval, admin account creation and role restri
   await page.getByRole('button', { name: 'Sign up' }).click();
   const signup = page.locator('.auth-modal');
   await signup.locator('input[name="name"]').fill('Audit Buyer');
+  await signup.locator('input[name="phone"]').fill('9999999999');
+  await signup.locator('select[name="role"]').selectOption('buyer');
   await signup.locator('input[name="email"]').fill(email);
   await signup.locator('input[name="password"]').fill('audit-buyer-password');
-  await signup.getByRole('button', { name: 'Create buyer account' }).click();
-  await expect(signup.getByText(/admin must approve your account/i)).toBeVisible();
-
+  await signup.getByRole('button', { name: 'Create account' }).click();
+  await signup.locator('input[name="otp"]').fill('123456');
+  await signup.getByRole('button', { name: 'Verify email' }).click();
+  await expect(signup.getByText(/admin must approve your buyer account/i)).toBeVisible();
   await login(page, 'admin@auction.test');
   await expect(page.getByRole('heading', { name: 'Welcome, Admin.' })).toBeVisible();
   const tabNames = [
@@ -110,11 +113,9 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
   const initialListings = await initialResponse.json();
   const created = initialListings.find(listing => listing.location === location);
   expect(created).toBeTruthy();
-  expect(created.imageUrl).toContain('/uploads/');
+  expect(created.imageUrl).toMatch(/^(data:image\/|https:\/\/)/);
   expect(created.quantity).toBe(12);
   expect(created.salePrice).toBe(800);
-  const uploadedPhoto = await page.context().request.get(`http://127.0.0.1:5000${created.imageUrl}`);
-  expect(uploadedPhoto.status()).toBe(200);
 
   const row = page.locator('.inventory-sale-list .catch-row').filter({ hasText: location });
   await expect(row).toBeVisible();

@@ -135,9 +135,7 @@ test('Expo fisherman handles the catch form, photo upload, and listing creation 
   expect(created.fishType).toBe('Mackerel');
   expect(created.quantity).toBe(8);
   expect(created.salePrice).toBe(650);
-  expect(created.imageUrl).toContain('/uploads/');
-  const uploadedPhoto = await page.request.get(`http://127.0.0.1:5001${created.imageUrl}`);
-  expect(uploadedPhoto.status()).toBe(200);
+  expect(created.imageUrl).toMatch(/^(data:image\/|https:\/\/)/);
 
   await page.getByRole('button', { name: 'Log out' }).first().click();
   await expect(page).toHaveURL(/\/login$/);

@@ -87,6 +87,13 @@ export function AuthProvider({ children }) {
     setToken(null);
     setUser(null);
   }, []);
+  const completeSignIn = useCallback(async result => {
+    await storeToken(result.token);
+    mobileApi.setToken(result.token);
+    setToken(result.token);
+    setUser(result.user);
+    setError('');
+  }, []);
   const updateUser = useCallback(nextUser => {
     setUser(current => current ? { ...current, ...nextUser } : nextUser);
   }, []);
@@ -97,10 +104,11 @@ export function AuthProvider({ children }) {
     checking,
     error,
     signIn,
+    completeSignIn,
     signOut,
     updateUser,
     retrySession: () => setRetry(value => value + 1)
-  }), [user, token, checking, error, signIn, signOut, updateUser]);
+  }), [user, token, checking, error, signIn, completeSignIn, signOut, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

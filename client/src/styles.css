@@ -650,7 +650,7 @@
 .inventory-bid-list .inventory-list-heading .kicker{color:#7962c7}
 .inventory-bid-list .inventory-list-heading h2{color:#342b62}
 .fisherman-inventory-lists .inventory-bid-list .inventory-list-count{border-color:#dfd7f6;background:linear-gradient(120deg,#f5f2ff,#ece8ff);color:#6955b3}
-.fisherman-inventory-lists .inventory-empty{margin:0;padding:16px 3px;color:#778780;font-size:11px}
+.fisherman-inventory-lists .inventory-empty{margin:0;padding:16px 3px;color:#4f625d;font-size:11px}
 .fisherman-inventory-lists .inventory-bid-list .catch-row .quality{color:#8065df}
 .fisherman-view .listing-page{position:relative;overflow:hidden;padding:24px;border:1px solid #cfe4dc;border-radius:17px;background:radial-gradient(ellipse at 100% 0,#e7e2ff66,transparent 30%),linear-gradient(145deg,#fff,#f4faf7);box-shadow:0 15px 38px #173a4312;animation:market-rise-in .48s both}
 .fisherman-view .listing-page::before{position:absolute;top:0;right:0;left:0;height:4px;background:linear-gradient(90deg,#16a48e,#7b68dc 52%,#efb947);content:''}

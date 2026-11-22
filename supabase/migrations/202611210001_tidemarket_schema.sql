@@ -1,3 +1,26 @@
+-- Fresh TideMarket PostgreSQL setup. This migration creates a new database only.
+
+CREATE TABLE IF NOT EXISTS public.fish_categories (
+  name text PRIMARY KEY,
+  active boolean NOT NULL DEFAULT true,
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.fish_categories (name)
+VALUES
+  ('Tuna'), ('Pomfret'), ('Mackerel'), ('Sardine'), ('Prawns'), ('Kingfish'),
+  ('Crab'), ('Squid'), ('Lobster'), ('Clams'), ('Mussels'), ('Oysters'),
+  ('Anchovy'), ('Seer Fish'), ('Bangus'), ('Big Head Carp'), ('Black Spotted Barb'),
+  ('Catfish'), ('Climbing Perch'), ('Fourfinger Threadfin'), ('Freshwater Eel'),
+  ('Glass Perchlet'), ('Goby'), ('Gold Fish'), ('Gourami'), ('Grass Carp'),
+  ('Green Spotted Puffer'), ('Indian Carp'), ('Indo-Pacific Tarpon'),
+  ('Jaguar Gapote'), ('Janitor Fish'), ('Knifefish'), ('Long-Snouted Pipefish'),
+  ('Mosquito Fish'), ('Mudfish'), ('Mullet'), ('Pangasius'), ('Perch'),
+  ('Scat Fish'), ('Silver Barb'), ('Silver Carp'), ('Silver Perch'),
+  ('Snakehead'), ('Tenpounder'), ('Tilapia')
+ON CONFLICT (name) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS public.users (
   id text PRIMARY KEY,
   name text,
@@ -41,11 +64,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS registration_requests_pending_email_unique
 CREATE TABLE IF NOT EXISTS public.listings (
   id text PRIMARY KEY,
   fisherman text REFERENCES public.users(id) ON DELETE SET NULL,
-  "fishType" text,
+  "fishType" text REFERENCES public.fish_categories(name),
   quality text,
   size text,
   quantity numeric(12, 3),
   location text,
+  freshness text,
   price numeric(12, 2),
   "expectedPrice" numeric(12, 2),
   "salePrice" numeric(12, 2),
@@ -75,6 +99,24 @@ CREATE TABLE IF NOT EXISTS public.listings (
 CREATE INDEX IF NOT EXISTS listings_fisherman_created_idx ON public.listings (fisherman, "createdAt" DESC);
 CREATE INDEX IF NOT EXISTS listings_marketplace_idx ON public.listings (status, "fishType", location);
 CREATE INDEX IF NOT EXISTS listings_reservation_idx ON public.listings (status, "reservedBy");
+
+CREATE TABLE IF NOT EXISTS public.listing_images (
+  id text PRIMARY KEY,
+  listing text NOT NULL REFERENCES public.listings(id) ON DELETE CASCADE,
+  "storagePath" text NOT NULL,
+  "imageUrl" text,
+  position integer NOT NULL DEFAULT 0,
+  "contentType" text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "isPrimary" boolean NOT NULL DEFAULT false,
+  "createdAt" timestamptz NOT NULL DEFAULT now(),
+  "updatedAt" timestamptz NOT NULL DEFAULT now(),
+  "legacyData" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  version bigint NOT NULL DEFAULT 1,
+  CONSTRAINT listing_images_position_nonnegative CHECK (position >= 0)
+);
+CREATE INDEX IF NOT EXISTS listing_images_listing_position_idx
+  ON public.listing_images (listing, position, "createdAt");
 
 CREATE TABLE IF NOT EXISTS public.auctions (
   id text PRIMARY KEY,
@@ -411,6 +453,34 @@ CREATE TABLE IF NOT EXISTS public.auction_chat_rate_limits (
   version bigint NOT NULL DEFAULT 1
 );
 
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'fish-images',
+  'fish-images',
+  true,
+  5242880,
+  ARRAY['image/jpeg', 'image/png', 'image/webp']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+DROP POLICY IF EXISTS "Public fish image read" ON storage.objects;
+CREATE POLICY "Public fish image read"
+ON storage.objects FOR SELECT
+TO anon, authenticated
+USING (bucket_id = 'fish-images');
+
+DROP POLICY IF EXISTS "No direct fish image writes" ON storage.objects;
+CREATE POLICY "No direct fish image writes"
+ON storage.objects FOR ALL
+TO anon, authenticated
+USING (false)
+WITH CHECK (false);
+
+ALTER TABLE public.fish_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.listing_images ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.registration_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.listings ENABLE ROW LEVEL SECURITY;
@@ -435,7 +505,7 @@ DECLARE
   table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'users', 'registration_requests', 'listings', 'auctions', 'bids', 'orders',
+    'fish_categories', 'users', 'registration_requests', 'listings', 'listing_images', 'auctions', 'bids', 'orders',
     'payments', 'notifications', 'reviews', 'disputes', 'verification_history',
     'reputations', 'price_models', 'price_predictions', 'price_model_evaluations',
     'auction_messages', 'auction_message_reports', 'auction_chat_rate_limits'
@@ -464,7 +534,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   allowed_tables text[] := ARRAY[
-    'users', 'registration_requests', 'listings', 'auctions', 'bids', 'orders',
+    'users', 'registration_requests', 'listings', 'listing_images', 'auctions', 'bids', 'orders',
     'payments', 'notifications', 'reviews', 'disputes', 'verification_history',
     'reputations', 'price_models', 'price_predictions', 'price_model_evaluations',
     'auction_messages', 'auction_message_reports', 'auction_chat_rate_limits'
@@ -473,12 +543,23 @@ DECLARE
   source_columns_sql text;
   row_data jsonb;
   auction_row public.auctions%ROWTYPE;
+  version_matches boolean;
 BEGIN
   IF NOT p_table = ANY(allowed_tables) THEN
     RAISE EXCEPTION 'Unsupported table: %', p_table USING ERRCODE = '22023';
   END IF;
   IF p_record->>'id' IS DISTINCT FROM p_id THEN
     RAISE EXCEPTION 'Record ID does not match the transaction key' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_expected_version IS NOT NULL THEN
+    EXECUTE format(
+      'SELECT EXISTS (SELECT 1 FROM public.%I WHERE id = $1 AND version = $2)',
+      p_table
+    ) INTO version_matches USING p_id, p_expected_version;
+    IF NOT COALESCE(version_matches, false) THEN
+      RETURN NULL;
+    END IF;
   END IF;
 
   IF p_table = 'auctions' AND p_expected_version IS NOT NULL THEN

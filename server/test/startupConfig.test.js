@@ -14,7 +14,10 @@ test('production startup requires an explicit JWT secret and admin password', ()
   assert.doesNotThrow(() => validateProductionConfig({
     NODE_ENV: 'production',
     JWT_SECRET: 'configured',
-    ADMIN_PASSWORD: 'configured'
+    ADMIN_PASSWORD: 'configured',
+    RESEND_API_KEY: 'configured',
+    OTP_FROM_EMAIL: 'Fishing Bid <verification@example.test>',
+    OTP_HASH_SECRET: 'configured'
   }));
 });
 

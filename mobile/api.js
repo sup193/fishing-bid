@@ -52,6 +52,9 @@ const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
 export const mobileApi = {
   setToken: token => { authToken = token; },
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  register: body => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
+  verifyOtp: body => request('/auth/verify-otp', { method: 'POST', body: JSON.stringify(body) }),
+  resendOtp: body => request('/auth/resend-otp', { method: 'POST', body: JSON.stringify(body) }),
   me: token => request('/auth/me', { token }),
   listings: () => request('/listings'),
   marketTrends: days => request(`/market/trends?days=${encodeURIComponent(days)}`),
