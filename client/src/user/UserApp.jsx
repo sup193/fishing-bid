@@ -724,7 +724,7 @@ export default function UserApp({ user, onAuth }) {
         <div className="buyer-welcome">
           <div>
             <p className="kicker">BUYER WORKSPACE</p>
-            <h1>Welcome back, {user.name?.split(' ')[0] || 'there'}.</h1>
+            <h1>Welcome back, {user.name?.trim() || 'there'}.</h1>
             <p>Find today's catch, follow your bids, and keep track of every payment.</p>
           </div>
           <span className="buyer-live-pill"><span /> MARKET OPEN</span>

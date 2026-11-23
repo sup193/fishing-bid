@@ -24,8 +24,25 @@ export default function App() {
     setUser(result.user);
     setAuthMode(null);
   };
+  useEffect(() => {
+    const token = localStorage.getItem('tide_token');
+    if (!token) return;
+    api.me()
+      .then(result => {
+        localStorage.setItem('tide_user', JSON.stringify(result.user));
+        setUser(result.user);
+      })
+      .catch(error => {
+        if (error.status === 401) {
+          localStorage.removeItem('tide_token');
+          localStorage.removeItem('tide_user');
+          setUser(null);
+        }
+      });
+  }, []);
   const logout = () => {
-    localStorage.clear();
+    localStorage.removeItem('tide_token');
+    localStorage.removeItem('tide_user');
     setUser(null);
   };
   const rolePage = user?.role === 'admin'
@@ -113,12 +130,132 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   const [submittingOtp, setSubmittingOtp] = useState(false);
   const [resending, setResending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [resetStep, setResetStep] = useState(null);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [resetSeconds, setResetSeconds] = useState(0);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const change = event => setForm({ ...form, [event.target.name]: event.target.value });
   useEffect(() => {
     if (!seconds) return undefined;
     const timer = window.setInterval(() => setSeconds(value => Math.max(0, value - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [seconds]);
+  useEffect(() => {
+    if (!resetSeconds) return undefined;
+    const timer = window.setInterval(() => setResetSeconds(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resetSeconds]);
+  useEffect(() => {
+    setPending(null);
+    setOtp('');
+    setSeconds(0);
+    setError('');
+    setResetStep(null);
+    setResetOtp('');
+    setResetToken('');
+    setResetSeconds(0);
+    setResetMessage('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+  }, [mode]);
+  const backToLogin = () => {
+    setResetStep(null);
+    setResetOtp('');
+    setResetToken('');
+    setResetSeconds(0);
+    setResetMessage('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setError('');
+  };
+  const requestResetOtp = async event => {
+    event.preventDefault();
+    setError('');
+    const email = resetEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const result = await api.forgotPassword({ email });
+      setResetEmail(email);
+      setResetMessage(result.message);
+      setResetSeconds(result.resendAfter || 60);
+      setResetStep('otp');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResetBusy(false);
+    }
+  };
+  const verifyResetOtp = async event => {
+    event.preventDefault();
+    setError('');
+    if (!/^\d{6}$/.test(resetOtp)) {
+      setError('Enter the 6-digit verification code.');
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const result = await api.verifyResetOtp({ email: resetEmail, otp: resetOtp });
+      setResetToken(result.resetToken);
+      setResetStep('password');
+      setResetMessage('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResetBusy(false);
+    }
+  };
+  const resendResetOtp = async () => {
+    setError('');
+    setResetBusy(true);
+    try {
+      const result = await api.resendResetOtp({ email: resetEmail });
+      setResetOtp('');
+      setResetMessage(result.message);
+      setResetSeconds(result.resendAfter || 60);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResetBusy(false);
+    }
+  };
+  const updatePassword = async event => {
+    event.preventDefault();
+    setError('');
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      setError('Password must be between 8 and 128 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError('The passwords do not match.');
+      return;
+    }
+    setResetBusy(true);
+    try {
+      const result = await api.resetPassword({
+        resetToken,
+        newPassword,
+        confirmNewPassword
+      });
+      setResetToken('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setResetMessage(result.message);
+      setResetStep('success');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResetBusy(false);
+    }
+  };
   const submit = async event => {
     event.preventDefault();
     setError('');
@@ -146,6 +283,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
         setPending(null);
         setOtp('');
         setError(result.message);
+        onSwitch();
         return;
       }
       onAuthenticated(result);
@@ -173,7 +311,86 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
     <div className="modal auth-modal" onClick={event => event.stopPropagation()}>
       <button className="close" onClick={onClose}>×</button>
       <p className="kicker">TIDEMARKET ACCOUNT</p>
-      {pending ? <>
+      {resetStep ? <>
+        {resetStep === 'email' && <>
+          <h2>Reset your password.</h2>
+          <p>Enter your account email to receive a verification code.</p>
+          <form onSubmit={requestResetOtp} autoComplete="on">
+            <input
+              name="resetEmail"
+              type="email"
+              placeholder="Email address"
+              autoComplete="email"
+              value={resetEmail}
+              onChange={event => setResetEmail(event.target.value)}
+              required
+            />
+            {error && <p className="form-error">{error}</p>}
+            <button className="button primary full" type="submit" disabled={resetBusy}>
+              {resetBusy ? 'Sending…' : 'Proceed'}
+            </button>
+            <button className="switch-auth" type="button" onClick={backToLogin}>Back to Login</button>
+          </form>
+        </>}
+        {resetStep === 'otp' && <>
+          <h2>Verify your email.</h2>
+          <p>{resetMessage}</p>
+          <p>Enter the 6-digit code sent to {resetEmail.replace(/(^.).*(@.*$)/, '$1•••$2')}.</p>
+          <form onSubmit={verifyResetOtp} autoComplete="one-time-code">
+            <input
+              name="resetOtp"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              placeholder="6-digit code"
+              value={resetOtp}
+              onChange={event => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              required
+            />
+            {error && <p className="form-error">{error}</p>}
+            {resetSeconds <= 0
+              ? <button className="switch-auth" type="button" onClick={resendResetOtp} disabled={resetBusy}>{resetBusy ? 'Sending…' : 'Resend OTP'}</button>
+              : <p>Resend available in {resetSeconds}s</p>}
+            <button className="button primary full" type="submit" disabled={resetBusy}>{resetBusy ? 'Verifying…' : 'Verify OTP'}</button>
+            <button className="switch-auth" type="button" onClick={backToLogin}>Back to Login</button>
+          </form>
+        </>}
+        {resetStep === 'password' && <>
+          <h2>Choose a new password.</h2>
+          <form onSubmit={updatePassword} autoComplete="new-password">
+            <input
+              name="newPassword"
+              type="password"
+              placeholder="New password"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={128}
+              value={newPassword}
+              onChange={event => setNewPassword(event.target.value)}
+              required
+            />
+            <input
+              name="confirmNewPassword"
+              type="password"
+              placeholder="Confirm new password"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={128}
+              value={confirmNewPassword}
+              onChange={event => setConfirmNewPassword(event.target.value)}
+              required
+            />
+            {error && <p className="form-error">{error}</p>}
+            <button className="button primary full" type="submit" disabled={resetBusy}>{resetBusy ? 'Updating…' : 'Update Password'}</button>
+            <button className="switch-auth" type="button" onClick={backToLogin}>Back to Login</button>
+          </form>
+        </>}
+        {resetStep === 'success' && <>
+          <h2>Password updated.</h2>
+          <p>{resetMessage}</p>
+          <button className="button primary full" type="button" onClick={backToLogin}>Back to Login</button>
+        </>}
+      </> : pending ? <>
         <h2>Verify your email.</h2>
         <p>Enter the 6-digit code sent to {pending.email.replace(/(^.).*(@.*$)/, '$1•••$2')}.</p>
         <form onSubmit={verifyOtp} autoComplete="one-time-code">
@@ -201,14 +418,19 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
               {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
             </button>
           </div>
+          {mode === 'login' && <button className="switch-auth forgot-password-link" type="button" onClick={() => {
+            setResetEmail(form.email || '');
+            setResetStep('email');
+            setError('');
+          }}>Forgot Password?</button>}
           {error && <p className="form-error">{error}</p>}
           <button className="button primary full" type="submit">{mode === 'login' ? 'Log in' : 'Create account'}</button>
         </form>
       </>}
-      <p className="switch-auth-prompt">
+      {!resetStep && <p className="switch-auth-prompt">
         {mode === 'login' ? 'New to TideMarket?' : 'Already have an account?'}
         <button className="switch-auth" onClick={onSwitch}>{mode === 'login' ? 'Sign up' : 'Log in'}</button>
-      </p>
+      </p>}
     </div>
   </div>;
 }

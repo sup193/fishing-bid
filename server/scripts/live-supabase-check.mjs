@@ -31,7 +31,13 @@ const coreTables = [
   'reputations', 'price_models', 'price_predictions', 'price_model_evaluations', 'registration_requests',
   'auction_messages', 'auction_message_reports', 'auction_chat_rate_limits'
 ];
-const extraTables = ['fish_categories', 'listing_images', 'pending_registrations'];
+const extraTables = [
+  'fish_categories',
+  'listing_images',
+  'pending_registrations',
+  'password_reset_otps',
+  'password_reset_tokens'
+];
 const requiredTables = [...coreTables, ...extraTables];
 
 const results = [];

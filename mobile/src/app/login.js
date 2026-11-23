@@ -67,6 +67,8 @@ export default function LoginRoute() {
       const result = await mobileApi.verifyOtp({ email: pending.email, otp });
       if (result.status === 'pending') {
         setPending(null);
+        setOtp('');
+        setMode('login');
         setFormError(result.message);
       } else {
         await completeSignIn(result);
@@ -123,7 +125,7 @@ export default function LoginRoute() {
             {mode === 'register' ? <Field label="Role (buyer or fisherman)" value={role} onChangeText={value => setRole(['buyer', 'fisherman'].includes(value.trim().toLowerCase()) ? value.trim().toLowerCase() : value)} placeholder="buyer" /> : null}
             {formError ? <Notice>{formError}</Notice> : null}
             <Button label={mode === 'login' ? 'Log in' : 'Create account'} onPress={submit} loading={submitting} />
-            <Button label={mode === 'login' ? 'Sign up' : 'Back to login'} variant="secondary" onPress={() => { setMode(mode === 'login' ? 'register' : 'login'); setFormError(''); }} />
+            <Button label={mode === 'login' ? 'Sign up' : 'Back to login'} variant="secondary" onPress={() => { setPending(null); setOtp(''); setSeconds(0); setMode(mode === 'login' ? 'register' : 'login'); setFormError(''); }} />
           </>}
         </Card>
       </KeyboardAvoidingView>

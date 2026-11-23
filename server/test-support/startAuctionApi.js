@@ -39,6 +39,11 @@ database.reviews = {
   }
 };
 fs.writeFileSync(databasePath, JSON.stringify(database, null, 2));
+const emailService = await import('../src/emailService.js');
+emailService.setEmailSenderForTests(async payload => ({
+  data: { id: 'test-email' },
+  error: null
+}));
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(typeof input === 'string' ? input : input.url);
   if (url.origin !== razorpayOrigin) return originalFetch(input, options);
@@ -77,7 +82,5 @@ globalThis.fetch = async (input, options = {}) => {
   throw new Error(`Unexpected Razorpay test request: ${method} ${url.pathname}`);
 };
 process.on('exit', () => fs.rmSync(tempDir, { recursive: true, force: true }));
-const emailService = await import('../src/emailService.js');
-emailService.setEmailSenderForTests(async payload => ({ data: { id: 'test-email' }, error: null }));
 const { startServer } = await import('../src/index.js');
 await startServer();

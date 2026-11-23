@@ -15,7 +15,23 @@ function getClient() {
   return resendClient;
 }
 
-function otpEmailHtml(name, otp) {
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
+}
+
+function otpEmailHtml(name, otp, purpose) {
+  const reset = purpose === 'password_reset';
+  const greetingName = escapeHtml(name || 'there');
+  const heading = reset ? 'Reset your Fishing Bid password' : 'Verify your Fishing Bid account';
+  const instruction = reset
+    ? 'Use this code to continue resetting your password:'
+    : 'Your email verification code is:';
   return `<!doctype html>
 <html>
   <body style="margin:0;background:#f5f4ee;font-family:Arial,sans-serif;color:#123c3a">
@@ -23,10 +39,10 @@ function otpEmailHtml(name, otp) {
       <tr><td align="center">
         <table role="presentation" width="520" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border-radius:8px;padding:32px">
           <tr><td>
-            <h1 style="margin:0 0 20px;font-size:24px">Verify your Fishing Bid account</h1>
-            <p>Hello ${name},</p>
-            <p>Welcome to Fishing Bid!</p>
-            <p>Your email verification code is:</p>
+            <h1 style="margin:0 0 20px;font-size:24px">${heading}</h1>
+            <p>Hello ${greetingName},</p>
+            <p>${reset ? 'We received a request to reset your password.' : 'Welcome to Fishing Bid!'}</p>
+            <p>${instruction}</p>
             <p style="font-size:32px;font-weight:700;letter-spacing:8px;margin:24px 0">${otp}</p>
             <p>This verification code expires in 5 minutes.</p>
             <p><strong>Do not share this code with anyone.</strong></p>
@@ -39,14 +55,22 @@ function otpEmailHtml(name, otp) {
 </html>`;
 }
 
-export async function sendOtpEmail({ name, email, otp }) {
+export async function sendOtpEmail({ name, email, otp, purpose = 'registration' }) {
+  if (!['registration', 'password_reset'].includes(purpose)) {
+    throw new Error('Unsupported email verification purpose');
+  }
+  const reset = purpose === 'password_reset';
+  const greetingName = name || 'there';
+  const subject = reset ? 'Reset your Fishing Bid password' : 'Verify your Fishing Bid account';
+  const intro = reset ? 'We received a request to reset your password.' : 'Welcome to Fishing Bid!';
+  const instruction = reset ? 'Use this code to continue resetting your password:' : 'Your email verification code is:';
   const from = process.env.OTP_FROM_EMAIL || 'Fishing Bid <onboarding@resend.dev>';
   const payload = {
     from,
     to: [email],
-    subject: 'Verify your Fishing Bid account',
-    html: otpEmailHtml(name, otp),
-    text: `Hello ${name},\n\nWelcome to Fishing Bid!\n\nYour email verification code is:\n\n${otp}\n\nThis verification code expires in 5 minutes.\n\nDo not share this code with anyone.\n\nThank you,\nFishing Bid Team`
+    subject,
+    html: otpEmailHtml(greetingName, otp, purpose),
+    text: `Hello ${greetingName},\n\n${intro}\n\n${instruction}\n\n${otp}\n\nThis verification code expires in 5 minutes.\n\nDo not share this code with anyone.\n\nThank you,\nFishing Bid Team`
   };
   if (testSender) return testSender(payload);
 

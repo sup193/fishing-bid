@@ -11,7 +11,7 @@ ADMIN_PASSWORD=your_private_admin_password
 
 Never place `SUPABASE_SECRET_KEY` in `VITE_` variables or Expo configuration. Never expose it in responses or client code.
 
-Apply `../supabase/migrations/202611210001_tidemarket_schema.sql` before starting production. The migration creates all application tables and the public-read `fish-images` bucket. It also leaves direct table and storage writes unavailable to browser roles; Express remains the authorization boundary.
+Apply the SQL migrations in version order before starting production: `../supabase/migrations/202611210001_tidemarket_schema.sql`, `../supabase/migrations/202611220001_pending_registrations.sql`, and `../supabase/migrations/202611220002_password_reset.sql`. The password-reset migration adds dedicated OTP and single-use reset-token records plus session token-versioning; it does not change existing user password hashes or registration requests. Direct table and storage writes remain unavailable to browser roles; Express remains the authorization boundary.
 
 Run the API:
 

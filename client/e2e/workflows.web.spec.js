@@ -17,6 +17,63 @@ async function logout(page, role) {
   await page.getByRole('button', { name: 'Log out of TideMarket' }).click();
 }
 
+test('existing JWT restores session and expired JWT is cleared', async ({ page }) => {
+  await login(page, 'fisherman@auction.test');
+  await expect(page.getByRole('button', { name: 'Open fisherman profile for Test Fisherman' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your catch,' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Open fisherman profile for Test Fisherman' })).toBeVisible();
+
+  await page.evaluate(() => {
+    localStorage.setItem('tide_token', 'expired.invalid.token');
+  });
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Log in' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign up' })).toBeVisible();
+});
+
+test('forgot password verifies a separate OTP, resets the password, and returns to login', async ({ page }) => {
+  const email = `reset-${Date.now()}@audit.test`;
+  const adminLogin = await page.context().request.post('http://127.0.0.1:5173/api/auth/login', {
+    data: { email: 'admin@auction.test', password }
+  });
+  expect(adminLogin.status()).toBe(200);
+  const adminToken = (await adminLogin.json()).token;
+  const created = await page.context().request.post('http://127.0.0.1:5173/api/admin/fishermen', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: { name: 'Reset Test Seller', email, password: 'OriginalResetPassword123' }
+  });
+  expect(created.status()).toBe(201);
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Log in' }).first().click();
+  const modal = page.locator('.auth-modal');
+  await modal.getByRole('button', { name: 'Forgot Password?' }).click();
+  await modal.locator('input[name="resetEmail"]').fill(email);
+  await modal.getByRole('button', { name: 'Proceed' }).click();
+  await expect(modal.getByText(/If an account exists for this email/)).toBeVisible();
+  await modal.locator('input[name="resetOtp"]').fill('123456');
+  await modal.getByRole('button', { name: 'Verify OTP' }).click();
+
+  await modal.locator('input[name="newPassword"]').fill('UpdatedResetPassword456');
+  await modal.locator('input[name="confirmNewPassword"]').fill('MismatchedPassword789');
+  await modal.getByRole('button', { name: 'Update Password' }).click();
+  await expect(modal.getByText('The passwords do not match.')).toBeVisible();
+
+  await modal.locator('input[name="confirmNewPassword"]').fill('UpdatedResetPassword456');
+  await modal.getByRole('button', { name: 'Update Password' }).click();
+  await expect(modal.getByRole('heading', { name: 'Password updated.' })).toBeVisible();
+  await modal.getByRole('button', { name: 'Back to Login' }).click();
+  await modal.locator('input[name="email"]').fill(email);
+  await modal.locator('input[name="password"]').fill('OriginalResetPassword123');
+  await modal.getByRole('button', { name: 'Log in' }).click();
+  await expect(modal.getByText('Invalid email or password')).toBeVisible();
+
+  await modal.locator('input[name="password"]').fill('UpdatedResetPassword456');
+  await modal.getByRole('button', { name: 'Log in' }).click();
+  await expect(page.getByRole('button', { name: 'Open fisherman profile for Reset Test Seller' })).toBeVisible();
+});
+
 test('buyer registration, admin approval, admin account creation and role restrictions work end-to-end', async ({ page }) => {
   const email = `buyer-${Date.now()}@audit.test`;
   await page.goto('/');
@@ -30,7 +87,7 @@ test('buyer registration, admin approval, admin account creation and role restri
   await signup.getByRole('button', { name: 'Create account' }).click();
   await signup.locator('input[name="otp"]').fill('123456');
   await signup.getByRole('button', { name: 'Verify email' }).click();
-  await expect(signup.getByText(/admin must approve your buyer account/i)).toBeVisible();
+  await expect(page.locator('.auth-modal').getByRole('heading', { name: 'Welcome back to the water.' })).toBeVisible();
   await login(page, 'admin@auction.test');
   await expect(page.getByRole('heading', { name: 'Welcome, Admin.' })).toBeVisible();
   const tabNames = [
@@ -73,7 +130,14 @@ test('buyer registration, admin approval, admin account creation and role restri
 
   await logout(page, 'admin');
   await login(page, email, 'audit-buyer-password');
-  await expect(page.getByRole('heading', { name: 'Welcome back, Audit.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome back, Audit Buyer.' })).toBeVisible();
+  await expect(page.locator('.buyer-welcome h1')).not.toContainText('OTP');
+  await page.evaluate(() => localStorage.setItem('tide_non_auth_state', 'preserve-me'));
+  await logout(page, 'buyer');
+  expect(await page.evaluate(() => localStorage.getItem('tide_token'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('tide_non_auth_state'))).toBe('preserve-me');
+  await login(page, email, 'audit-buyer-password');
+  await expect(page.getByRole('heading', { name: 'Welcome back, Audit Buyer.' })).toBeVisible();
   const buyerToken = await page.evaluate(() => localStorage.getItem('tide_token'));
   const adminOnly = await page.context().request.get('http://127.0.0.1:5173/api/admin/overview', {
     headers: { Authorization: `Bearer ${buyerToken}` }

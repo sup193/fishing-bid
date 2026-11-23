@@ -1,6 +1,12 @@
 # Fresh TideMarket Supabase Setup
 
-Run [`migrations/202611210001_tidemarket_schema.sql`](./migrations/202611210001_tidemarket_schema.sql) once in the Supabase SQL Editor on an empty project.
+On a new project, run the migrations in order in the Supabase SQL Editor:
+
+1. [`migrations/202611210001_tidemarket_schema.sql`](./migrations/202611210001_tidemarket_schema.sql)
+2. [`migrations/202611220001_pending_registrations.sql`](./migrations/202611220001_pending_registrations.sql)
+3. [`migrations/202611220002_password_reset.sql`](./migrations/202611220002_password_reset.sql)
+
+For an existing Fishing Bid project that already has the first two migrations, apply only the password-reset migration. It adds reset-only tables and `users.tokenVersion`; it preserves all user records, password hashes, registration requests, and registration OTP records.
 
 The migration creates:
 

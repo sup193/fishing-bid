@@ -17,6 +17,8 @@ const localDbPath = path.resolve(process.env.TIDEMARKET_LOCAL_DB_PATH
 export const TABLES = Object.freeze({
   users: 'users',
   pendingRegistrations: 'pending_registrations',
+  passwordResetOtps: 'password_reset_otps',
+  passwordResetTokens: 'password_reset_tokens',
   listings: 'listings',
   listingImages: 'listing_images',
   auctions: 'auctions',
@@ -37,8 +39,10 @@ export const TABLES = Object.freeze({
   auctionChatRateLimits: 'auction_chat_rate_limits'
 });
 const fields = Object.freeze({
-  users: ['name', 'email', 'passwordHash', 'role', 'phone', 'location', 'verificationStatus', 'verificationUpdatedAt', 'verificationUpdatedBy', 'demo'],
+  users: ['name', 'email', 'passwordHash', 'role', 'phone', 'location', 'verificationStatus', 'verificationUpdatedAt', 'verificationUpdatedBy', 'tokenVersion', 'demo'],
   pendingRegistrations: ['name', 'email', 'phone', 'location', 'passwordHash', 'role', 'otpHash', 'expiresAt', 'attempts', 'lastSentAt', 'verifiedAt', 'consumedAt'],
+  passwordResetOtps: ['userId', 'email', 'otpHash', 'expiresAt', 'attempts', 'lastSentAt', 'consumedAt'],
+  passwordResetTokens: ['userId', 'tokenHash', 'expiresAt', 'consumedAt'],
   registrationRequests: ['name', 'email', 'passwordHash', 'role', 'phone', 'location', 'status', 'reviewedAt', 'reviewedBy'],
   listings: ['fisherman', 'fishType', 'quality', 'size', 'quantity', 'location', 'freshness', 'price', 'expectedPrice', 'salePrice', 'saleMode', 'description', 'imageUrl', 'imageVerification', 'status', 'reservedBy', 'predictedLow', 'predictedHigh', 'pricePrediction', 'removedAt', 'removedBy', 'demo'],
   listingImages: ['listing', 'storagePath', 'imageUrl', 'position', 'contentType', 'metadata', 'isPrimary'],
@@ -104,6 +108,40 @@ export function initSupabase() {
   return client;
 }
 
+export function classifySupabaseNetworkError(error) {
+  const cause = error?.cause;
+  const code = cause?.code || error?.code;
+  if (code === 'ENOTFOUND') return 'DNS resolution failure';
+  if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') return 'connection timeout';
+  if (code === 'ECONNREFUSED') return 'connection refused';
+  if (code === 'ECONNRESET') return 'connection reset';
+  if (code === 'CERT_HAS_EXPIRED' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') return 'TLS certificate verification failure';
+  if (/invalid url|invalid_url/i.test(error?.message || '')) return 'invalid Supabase URL';
+  if (error?.name === 'AbortError') return 'request timeout';
+  if (error?.name === 'TypeError' && /fetch failed/i.test(error?.message || '')) return 'network fetch failure';
+  return 'Supabase request failure';
+}
+
+export async function checkSupabaseConnection() {
+  const supabase = initSupabase();
+  if (!supabase) return { connected: false, local: true };
+  try {
+    const url = new URL(process.env.SUPABASE_URL);
+    if (url.protocol !== 'https:' || !url.hostname.endsWith('.supabase.co')) {
+      throw new Error('Invalid Supabase URL');
+    }
+    const { error } = await supabase.from('users').select('id').limit(1);
+    if (error) throw error;
+    return { connected: true, local: false, hostname: url.hostname };
+  } catch (error) {
+    const cause = classifySupabaseNetworkError(error);
+    const detail = { name: error?.name, code: error?.code || error?.cause?.code, cause: cause };
+    const wrapped = new Error(`Supabase connectivity check failed: ${cause}`);
+    wrapped.cause = detail;
+    throw wrapped;
+  }
+}
+
 export async function uploadFishImage(buffer, mimetype, ownerId) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error('Fish image content is required');
   if (isLocalDatabase()) {
@@ -143,6 +181,173 @@ export async function getPendingRegistration(email) {
     .maybeSingle();
   if (error) throw error;
   return normalizeRow(data);
+}
+
+export async function issuePasswordResetOtp({ email, otpId, otpHash, expiresAt, now }) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const user = Object.entries(store.users || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .find(item => String(item.email || '').trim().toLowerCase() === normalizedEmail);
+    if (!user) return { status: 'not_found' };
+
+    const activeOtp = Object.entries(store.passwordResetOtps || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.userId === user.id && !item.consumedAt)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0];
+    if (activeOtp && Date.parse(activeOtp.lastSentAt || 0) > Date.parse(now) - 60_000) {
+      return { status: 'cooldown' };
+    }
+
+    const timestamp = new Date(now).toISOString();
+    for (const [id, resetOtp] of Object.entries(store.passwordResetOtps || {})) {
+      if (resetOtp.userId === user.id && !resetOtp.consumedAt) {
+        store.passwordResetOtps[id].consumedAt = timestamp;
+        store.passwordResetOtps[id].updatedAt = timestamp;
+      }
+    }
+    for (const [id, resetToken] of Object.entries(store.passwordResetTokens || {})) {
+      if (resetToken.userId === user.id && !resetToken.consumedAt) {
+        store.passwordResetTokens[id].consumedAt = timestamp;
+      }
+    }
+    store.passwordResetOtps ??= {};
+    store.passwordResetOtps[otpId] = {
+      userId: user.id,
+      email: normalizedEmail,
+      otpHash,
+      expiresAt,
+      attempts: 0,
+      lastSentAt: timestamp,
+      consumedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    writeLocalDb(store);
+    return { status: 'issued', userId: user.id, email: normalizedEmail, name: user.name };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_issue_password_reset_otp', {
+    p_email: normalizedEmail,
+    p_otp_id: otpId,
+    p_otp_hash: otpHash,
+    p_expires_at: expiresAt,
+    p_now: now
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function consumePasswordResetOtp({
+  email,
+  otpHash,
+  tokenId,
+  tokenHash,
+  tokenExpiresAt,
+  now
+}) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const user = Object.entries(store.users || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .find(item => String(item.email || '').trim().toLowerCase() === normalizedEmail);
+    if (!user) return { status: 'invalid' };
+    const otp = Object.entries(store.passwordResetOtps || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.userId === user.id && !item.consumedAt)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0];
+    if (!otp) return { status: 'invalid' };
+    const timestamp = new Date(now).toISOString();
+    if (Date.parse(otp.expiresAt) <= Date.parse(timestamp)) {
+      store.passwordResetOtps[otp.id].consumedAt = timestamp;
+      store.passwordResetOtps[otp.id].updatedAt = timestamp;
+      writeLocalDb(store);
+      return { status: 'expired' };
+    }
+    const attempts = Number(otp.attempts || 0);
+    if (attempts >= 5) return { status: 'locked' };
+    if (otp.otpHash !== otpHash) {
+      store.passwordResetOtps[otp.id].attempts = attempts + 1;
+      store.passwordResetOtps[otp.id].updatedAt = timestamp;
+      writeLocalDb(store);
+      return attempts + 1 >= 5
+        ? { status: 'locked' }
+        : { status: 'incorrect', remainingAttempts: 5 - attempts - 1 };
+    }
+
+    store.passwordResetOtps[otp.id].consumedAt = timestamp;
+    store.passwordResetOtps[otp.id].updatedAt = timestamp;
+    store.passwordResetTokens ??= {};
+    for (const [id, resetToken] of Object.entries(store.passwordResetTokens)) {
+      if (resetToken.userId === user.id && !resetToken.consumedAt) {
+        store.passwordResetTokens[id].consumedAt = timestamp;
+      }
+    }
+    store.passwordResetTokens[tokenId] = {
+      userId: user.id,
+      tokenHash,
+      expiresAt: tokenExpiresAt,
+      consumedAt: null,
+      createdAt: timestamp
+    };
+    writeLocalDb(store);
+    return { status: 'verified' };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_consume_password_reset_otp', {
+    p_email: normalizedEmail,
+    p_otp_hash: otpHash,
+    p_token_id: tokenId,
+    p_token_hash: tokenHash,
+    p_token_expires_at: tokenExpiresAt,
+    p_now: now
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function resetPasswordWithToken({ tokenHash, passwordHash, now }) {
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const token = Object.entries(store.passwordResetTokens || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .find(item => item.tokenHash === tokenHash && !item.consumedAt);
+    if (!token) return { status: 'invalid' };
+    const timestamp = new Date(now).toISOString();
+    if (Date.parse(token.expiresAt) <= Date.parse(timestamp)) {
+      store.passwordResetTokens[token.id].consumedAt = timestamp;
+      writeLocalDb(store);
+      return { status: 'expired' };
+    }
+    const user = store.users?.[token.userId];
+    if (!user) return { status: 'invalid' };
+    store.users[token.userId] = {
+      ...user,
+      passwordHash,
+      tokenVersion: Number(user.tokenVersion || 0) + 1,
+      updatedAt: timestamp
+    };
+    for (const [id, resetToken] of Object.entries(store.passwordResetTokens || {})) {
+      if (resetToken.userId === token.userId && !resetToken.consumedAt) {
+        store.passwordResetTokens[id].consumedAt = timestamp;
+      }
+    }
+    for (const [id, resetOtp] of Object.entries(store.passwordResetOtps || {})) {
+      if (resetOtp.userId === token.userId && !resetOtp.consumedAt) {
+        store.passwordResetOtps[id].consumedAt = timestamp;
+        store.passwordResetOtps[id].updatedAt = timestamp;
+      }
+    }
+    writeLocalDb(store);
+    return { status: 'updated' };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_reset_password', {
+    p_token_hash: tokenHash,
+    p_password_hash: passwordHash,
+    p_now: now
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function consumePendingRegistration({ email, otpHash, userId }) {

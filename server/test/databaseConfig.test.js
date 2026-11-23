@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { initSupabase } from '../src/db.js';
+import { initSupabase, classifySupabaseNetworkError } from '../src/db.js';
 
 const environmentKeys = [
   'NODE_ENV',
@@ -55,4 +55,11 @@ test('Supabase refuses placeholder and publishable secret keys', () => {
   }, () => {
     assert.throws(() => initSupabase(), /publishable key/i);
   });
+});
+
+test('Supabase network errors receive safe root-cause classifications', () => {
+  assert.equal(classifySupabaseNetworkError({ cause: { code: 'ENOTFOUND' } }), 'DNS resolution failure');
+  assert.equal(classifySupabaseNetworkError({ cause: { code: 'ETIMEDOUT' } }), 'connection timeout');
+  assert.equal(classifySupabaseNetworkError({ name: 'TypeError', message: 'fetch failed', cause: { code: 'ECONNRESET' } }), 'connection reset');
+  assert.equal(classifySupabaseNetworkError({ cause: { code: 'CERT_HAS_EXPIRED' } }), 'TLS certificate verification failure');
 });

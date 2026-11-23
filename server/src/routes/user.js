@@ -8,8 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
-import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, consumePendingRegistration, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, consumePendingRegistration, issuePasswordResetOtp, consumePasswordResetOtp, resetPasswordWithToken, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -65,6 +65,12 @@ const otpRateLimits = new Map();
 const otpIpLimits = new Map();
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const PASSWORD_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
+const PASSWORD_RESET_RESPONSE = 'If an account exists for this email, a verification code has been sent.';
+const PASSWORD_RESET_RATE_WINDOW_MS = 15 * 60 * 1000;
+const passwordResetRequestLimits = new Map();
+const passwordResetVerifyLimits = new Map();
+const passwordResetCompletionLimits = new Map();
 
 function normalizeOtpEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -78,6 +84,45 @@ function otpSecret() {
 
 function hashOtp(email, otp) {
   return createHmac('sha256', otpSecret()).update(`${normalizeOtpEmail(email)}:${otp}`).digest('hex');
+}
+
+function hashPasswordResetOtp(email, otp) {
+  return createHmac('sha256', otpSecret())
+    .update(`password-reset-otp:${normalizeOtpEmail(email)}:${otp}`)
+    .digest('hex');
+}
+
+function hashPasswordResetToken(token) {
+  return createHmac('sha256', otpSecret())
+    .update(`password-reset-token:${token}`)
+    .digest('hex');
+}
+
+function consumePasswordResetLimit(limits, key, maxCount) {
+  const now = Date.now();
+  const current = limits.get(key);
+  if (current && current.resetAt > now && current.count >= maxCount) return false;
+  if (!current || current.resetAt <= now) {
+    limits.set(key, { count: 1, resetAt: now + PASSWORD_RESET_RATE_WINDOW_MS });
+  } else {
+    current.count += 1;
+  }
+  for (const [limitKey, value] of limits) {
+    if (value.resetAt <= now) limits.delete(limitKey);
+  }
+  return true;
+}
+
+function allowPasswordResetRequest(req, email) {
+  const normalizedEmail = normalizeOtpEmail(email) || 'invalid';
+  return consumePasswordResetLimit(passwordResetRequestLimits, `email:${normalizedEmail}`, 5)
+    && consumePasswordResetLimit(passwordResetRequestLimits, `ip:${req.ip || 'unknown'}`, 20);
+}
+
+function allowPasswordResetVerification(req, email) {
+  const normalizedEmail = normalizeOtpEmail(email) || 'invalid';
+  return consumePasswordResetLimit(passwordResetVerifyLimits, `email:${normalizedEmail}`, 10)
+    && consumePasswordResetLimit(passwordResetVerifyLimits, `ip:${req.ip || 'unknown'}`, 30);
 }
 
 function generateOtp() {
@@ -414,7 +459,7 @@ router.post('/auth/register', async (req, res) => {
       return res.status(400).json({ message: 'Use a valid name and email, role, and password between 8 and 128 characters' });
     }
     const users = await list('users');
-    if (users.some(user => String(user.email).toLowerCase() === email)) {
+    if (users.some(user => normalizeOtpEmail(user.email) === email)) {
       return res.status(409).json({ message: 'Email is already registered' });
     }
     if (phone && users.some(user => String(user.phone || '').trim() === phone)) {
@@ -423,19 +468,26 @@ router.post('/auth/register', async (req, res) => {
     const pendingRequests = role === 'buyer'
       ? (await list('registrationRequests')).filter(request => request.status === 'pending')
       : [];
-    if (pendingRequests.some(request => String(request.email).toLowerCase() === email)) {
+    if (pendingRequests.some(request => normalizeOtpEmail(request.email) === email)) {
       return res.status(409).json({ message: 'A registration request is already pending for this email.', status: 'pending' });
     }
     if (phone && pendingRequests.some(request => String(request.phone || '').trim() === phone)) {
       return res.status(409).json({ message: 'Phone number is already used by a pending registration.' });
     }
     const existingPending = await getPendingRegistration(email);
-    if (existingPending) return res.status(409).json({
-      status: 'pending',
-      message: 'A verification code is already pending for this email.',
-      email,
-      expiresAt: existingPending.expiresAt
-    });
+    if (existingPending) {
+      const elapsed = Date.now() - Date.parse(existingPending.lastSentAt || 0);
+      const retryAfter = elapsed >= OTP_RESEND_COOLDOWN_MS ? 0 : Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+      return res.status(202).json({
+        status: 'pending',
+        message: retryAfter > 0
+          ? 'Continue with the pending verification. A resend will be available shortly.'
+          : 'Continue with the pending verification or resend the code.',
+        email,
+        expiresAt: existingPending.expiresAt,
+        resendAvailableIn: retryAfter
+      });
+    }
     const passwordHash = await bcrypt.hash(password, 12);
     const otp = generateOtp();
     const now = new Date();
@@ -554,7 +606,187 @@ router.post('/auth/resend-otp', async (req, res) => {
     res.status(error.status || 500).json({ message: error.message });
   }
 });
-router.post('/auth/login', async (req, res) => { try { const email = req.body.email?.trim().toLowerCase(); const user = (await list('users')).find(item => item.email === email); if (!user) { const request = (await list('registrationRequests')).find(item => item.email === email && item.status === 'pending'); if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' }); return res.status(401).json({ message: 'Invalid email or password' }); } if (!(await bcrypt.compare(req.body.password || '', user.passwordHash))) return res.status(401).json({ message: 'Invalid email or password' }); res.json({ token: signUser(user), user: publicUser(user) }); } catch (error) { console.error('Admin/user login failed:', error); res.status(500).json({ message: 'Login service failed' }); } });
+router.post('/auth/forgot-password', async (req, res) => {
+  const email = normalizeOtpEmail(req.body?.email);
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  }
+  if (!allowPasswordResetRequest(req, email)) {
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  }
+
+  const now = new Date();
+  const otp = String(process.env.NODE_ENV === 'test' ? 123456 : randomInt(100000, 1000000));
+  const otpId = `password_reset_otp_${randomUUID()}`;
+  try {
+    const issued = await issuePasswordResetOtp({
+      email,
+      otpId,
+      otpHash: hashPasswordResetOtp(email, otp),
+      expiresAt: new Date(now.getTime() + OTP_TTL_MS).toISOString(),
+      now: now.toISOString()
+    });
+    if (issued.status === 'issued') {
+      try {
+        await sendOtpEmail({
+          name: issued.name || 'there',
+          email: issued.email,
+          otp,
+          purpose: 'password_reset'
+        });
+      } catch (error) {
+        console.error('Password reset email delivery failed:', error.message);
+      }
+    }
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  } catch (error) {
+    console.error('Password reset request failed:', error.message);
+    return res.status(503).json({ message: 'Password reset is temporarily unavailable. Please try again later.' });
+  }
+});
+
+router.post('/auth/resend-reset-otp', async (req, res) => {
+  const email = normalizeOtpEmail(req.body?.email);
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  }
+  if (!allowPasswordResetRequest(req, email)) {
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  }
+
+  const now = new Date();
+  const otp = String(process.env.NODE_ENV === 'test' ? 654321 : randomInt(100000, 1000000));
+  const otpId = `password_reset_otp_${randomUUID()}`;
+  try {
+    const issued = await issuePasswordResetOtp({
+      email,
+      otpId,
+      otpHash: hashPasswordResetOtp(email, otp),
+      expiresAt: new Date(now.getTime() + OTP_TTL_MS).toISOString(),
+      now: now.toISOString()
+    });
+    if (issued.status === 'issued') {
+      try {
+        await sendOtpEmail({
+          name: issued.name || 'there',
+          email: issued.email,
+          otp,
+          purpose: 'password_reset'
+        });
+      } catch (error) {
+        console.error('Password reset email delivery failed:', error.message);
+      }
+    }
+    return res.json({ message: PASSWORD_RESET_RESPONSE, resendAfter: 60 });
+  } catch (error) {
+    console.error('Password reset resend failed:', error.message);
+    return res.status(503).json({ message: 'Password reset is temporarily unavailable. Please try again later.' });
+  }
+});
+
+router.post('/auth/verify-reset-otp', async (req, res) => {
+  const email = normalizeOtpEmail(req.body?.email);
+  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : '';
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ message: 'Enter a valid email address and six-digit verification code.' });
+  }
+  if (!allowPasswordResetVerification(req, email)) {
+    return res.status(429).json({ message: 'Too many verification attempts. Request a new code and try again.' });
+  }
+
+  const token = randomBytes(32).toString('hex');
+  const now = new Date();
+  const tokenExpiresAt = new Date(now.getTime() + PASSWORD_RESET_TOKEN_TTL_MS).toISOString();
+  try {
+    const result = await consumePasswordResetOtp({
+      email,
+      otpHash: hashPasswordResetOtp(email, otp),
+      tokenId: `password_reset_token_${randomUUID()}`,
+      tokenHash: hashPasswordResetToken(token),
+      tokenExpiresAt,
+      now: now.toISOString()
+    });
+    if (result.status === 'expired') {
+      return res.status(410).json({ message: 'This verification code has expired. Request a new code.' });
+    }
+    if (result.status === 'locked') {
+      return res.status(429).json({ message: 'Maximum verification attempts reached. Request a new code.' });
+    }
+    if (result.status === 'incorrect') {
+      return res.status(400).json({
+        message: 'Invalid verification code.',
+        remainingAttempts: result.remainingAttempts
+      });
+    }
+    if (result.status !== 'verified') {
+      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+    }
+    return res.json({ resetToken: token, expiresAt: tokenExpiresAt });
+  } catch (error) {
+    console.error('Password reset OTP verification failed:', error.message);
+    return res.status(503).json({ message: 'Password reset is temporarily unavailable. Please try again later.' });
+  }
+});
+
+router.post('/auth/reset-password', async (req, res) => {
+  if (!consumePasswordResetLimit(passwordResetCompletionLimits, `ip:${req.ip || 'unknown'}`, 10)) {
+    return res.status(429).json({ message: 'Too many password reset attempts. Try again later.' });
+  }
+  const token = typeof req.body?.resetToken === 'string' ? req.body.resetToken : '';
+  const password = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  const confirmation = typeof req.body?.confirmNewPassword === 'string' ? req.body.confirmNewPassword : '';
+  if (!/^[a-f0-9]{64}$/i.test(token)) {
+    return res.status(400).json({ message: 'The password reset authorization is invalid or expired.' });
+  }
+  if (password.length < 8 || password.length > 128) {
+    return res.status(400).json({ message: 'Password must be between 8 and 128 characters.' });
+  }
+  if (password !== confirmation) {
+    return res.status(400).json({ message: 'The passwords do not match.' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await resetPasswordWithToken({
+      tokenHash: hashPasswordResetToken(token),
+      passwordHash,
+      now: new Date().toISOString()
+    });
+    if (result.status === 'expired') {
+      return res.status(410).json({ message: 'The password reset authorization has expired. Request a new code.' });
+    }
+    if (result.status !== 'updated') {
+      return res.status(400).json({ message: 'The password reset authorization is invalid or already used.' });
+    }
+    return res.json({ message: 'Your password has been updated. Please sign in with your new password.' });
+  } catch (error) {
+    console.error('Password reset failed:', error.message);
+    return res.status(503).json({ message: 'Password reset is temporarily unavailable. Please try again later.' });
+  }
+});
+
+router.post('/auth/login', async (req, res) => {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    if (!email || typeof req.body.password !== 'string') {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+    const user = (await list('users')).find(item => normalizeOtpEmail(item.email) === email);
+    if (!user) {
+      const request = (await list('registrationRequests')).find(item =>
+        normalizeOtpEmail(item.email) === email && item.status === 'pending');
+      if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' });
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+    if (!(await bcrypt.compare(req.body.password, user.passwordHash))) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+    return res.json({ token: signUser(user), user: publicUser(user) });
+  } catch (error) {
+    console.error('Login failed:', error.message);
+    return res.status(500).json({ message: 'Login service failed' });
+  }
+});
 router.get('/auth/me', requireAuth, (req, res) => res.json({ user: req.user }));
 router.get('/fisherman/reputation', requireAuth, allow('fisherman'), async (req, res) => {
   const reputation = await getFishermanReputation(req.user.id);

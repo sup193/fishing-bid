@@ -92,6 +92,24 @@ No demo records or old records were inserted. The temporary live-check records w
 
 The stale-bid failure indicates that the hosted RPC is older than the migration source. The SQL source now contains an explicit row-version precheck, but the updated migration must be reapplied in the Supabase SQL Editor before stale transactions are rejected.
 
+## Database startup diagnosis
+
+The former `fetch failed` startup error was caused by an unclassified network failure: it did not identify DNS, timeout, TLS, or URL validity. DNS resolution currently succeeds for `jrgkxtlcuakxvdkqygxs.supabase.co`, native Node HTTPS returns the Supabase REST endpoint successfully, and direct startup now authenticates by querying `users`.
+
+`server/.env` is loaded from `server/src/../.env`, which resolves to `server/.env`; the backend loads it before creating the Supabase JS client. Startup now validates URL format and the complete Supabase key presence, performs `users` table access, and reports DNS/timeout/TLS/refusal/reset classifications without exposing credential values.
+
+## Password-reset migration
+
+The versioned migration [`202611220002_password_reset.sql`](./supabase/migrations/202611220002_password_reset.sql) adds dedicated password-reset OTP and single-use authorization tables plus user token-versioning. It does not update or delete existing users, password hashes, registration requests, or registration OTP rows. Apply it in the Supabase SQL Editor after `202611220001_pending_registrations.sql`; it has **not been applied to the hosted project in this task**.
+
+Final clean restart result:
+
+- Supabase connection/schema check: **Passed**
+- API listener: **Passed** on port 5000
+- `/api/health`: **HTTP 200**
+
+The project was not paused or unavailable during the successful checks.
+
 ## Validation
 
 | Check | Result |

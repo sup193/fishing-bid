@@ -8,7 +8,7 @@ import morgan from 'morgan';
 import bcrypt from 'bcryptjs';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
-import { initSupabase, insert, list } from './db.js';
+import { initSupabase, insert, list, checkSupabaseConnection } from './db.js';
 import { refreshAuction } from './utils.js';
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -85,7 +85,10 @@ async function settleAuctions() {
 export async function startServer({ port = process.env.PORT || 5000, sweepIntervalMs = 15_000 } = {}) {
   validateProductionConfig();
   const database = initSupabase();
-  if (database) console.log('Supabase PostgreSQL: checking database connection and schema...');
+  if (database) {
+    console.log('Supabase PostgreSQL: checking database connection and schema...');
+    await checkSupabaseConnection();
+  }
   await seed();
   console.log(database ? 'Supabase PostgreSQL: ready' : 'Local database: ready');
   await settleAuctions();
@@ -95,7 +98,7 @@ export async function startServer({ port = process.env.PORT || 5000, sweepInterv
     listener.once('error', reject);
   });
   const address = server.address();
-  console.log(`API listening on http://localhost:${typeof address === 'object' ? address.port : port}`);
+  console.log(`API listening on ${describeListenerAddress(address, port)}`);
   return {
     server,
     close: async () => {
@@ -115,11 +118,20 @@ export function validateProductionConfig(env = process.env) {
   if (!env.OTP_HASH_SECRET) throw new Error('OTP_HASH_SECRET is required in production');
 }
 
+export function describeListenerAddress(address, configuredPort) {
+  if (address === null) return `configured port ${configuredPort} (bound address unavailable)`;
+  if (typeof address === 'string') return `socket ${address}`;
+  return `http://localhost:${address.port}`;
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     await startServer();
   } catch (error) {
-    console.error('Database startup failed:', error.message);
+    console.error('API startup failed:', {
+      message: error.message,
+      cause: error.cause || null
+    });
     process.exitCode = 1;
   }
 }

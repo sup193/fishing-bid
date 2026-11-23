@@ -18,7 +18,11 @@ export async function request(path, options = {}) {
     }
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || 'Request failed');
+  if (!response.ok) {
+    const error = new Error(data.message || 'Request failed');
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -36,6 +40,10 @@ export const api = {
   login: body => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   verifyOtp: body => request('/auth/verify-otp', { method: 'POST', body: JSON.stringify(body) }),
   resendOtp: body => request('/auth/resend-otp', { method: 'POST', body: JSON.stringify(body) }),
+  forgotPassword: body => request('/auth/forgot-password', { method: 'POST', body: JSON.stringify(body) }),
+  verifyResetOtp: body => request('/auth/verify-reset-otp', { method: 'POST', body: JSON.stringify(body) }),
+  resendResetOtp: body => request('/auth/resend-reset-otp', { method: 'POST', body: JSON.stringify(body) }),
+  resetPassword: body => request('/auth/reset-password', { method: 'POST', body: JSON.stringify(body) }),
   register: body => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   me: () => request('/auth/me'),
   orders: () => request('/orders'),

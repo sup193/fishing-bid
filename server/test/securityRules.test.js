@@ -26,4 +26,19 @@ test('Supabase migration enables default-deny RLS and keeps privileged operation
   assert.match(otpMigration, /CREATE TABLE IF NOT EXISTS public\.pending_registrations/);
   assert.match(otpMigration, /"otpHash" text NOT NULL/);
   assert.match(otpMigration, /tidemarket_consume_registration_otp/);
+
+  const resetMigration = fs.readFileSync(
+    path.join(projectRoot, 'supabase', 'migrations', '202611220002_password_reset.sql'),
+    'utf8'
+  );
+  assert.match(resetMigration, /ADD COLUMN IF NOT EXISTS "tokenVersion" integer NOT NULL DEFAULT 0/);
+  assert.match(resetMigration, /CREATE TABLE IF NOT EXISTS public\.password_reset_otps/);
+  assert.match(resetMigration, /CREATE TABLE IF NOT EXISTS public\.password_reset_tokens/);
+  assert.match(resetMigration, /"tokenHash" text NOT NULL UNIQUE/);
+  assert.match(resetMigration, /tidemarket_consume_password_reset_otp/);
+  assert.match(resetMigration, /tidemarket_reset_password/);
+  assert.match(resetMigration, /ALTER TABLE public\.password_reset_otps ENABLE ROW LEVEL SECURITY/);
+  assert.match(resetMigration, /ALTER TABLE public\.password_reset_tokens ENABLE ROW LEVEL SECURITY/);
+  assert.match(resetMigration, /REVOKE ALL ON FUNCTION public\.tidemarket_reset_password/);
+  assert.match(resetMigration, /GRANT EXECUTE ON FUNCTION public\.tidemarket_reset_password.* TO service_role/);
 });
