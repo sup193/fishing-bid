@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Activity, CheckCircle2, ClipboardList, Clock3, Fish, Gavel, ImagePlus, MessageCircle, PackageCheck, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
 import { api } from '../api.js';
 import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
@@ -11,8 +12,19 @@ import DemandForecastPanel from '../DemandForecastPanel.jsx';
 const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', storagePath: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
 export default function FishermanDashboard({ initialView = 'inventory', onViewChange }) {
-  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [view, setView] = useState('inventory'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null); const [chatAuction, setChatAuction] = useState(null);
-  useEffect(() => setView(initialView), [initialView]);
+  const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [meta, setMeta] = useState({ fishTypes: [], qualities: [], sizes: [] }); const [form, setForm] = useState(emptyForm); const [mode, setMode] = useState(null); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [imageUploading, setImageUploading] = useState(false); const [reputation, setReputation] = useState(null); const [editingListing, setEditingListing] = useState(null); const [chatAuction, setChatAuction] = useState(null);
+  const view = initialView;
+  useEffect(() => {
+    if (initialView === 'create-auction') {
+      setForm({ ...emptyForm, saleMode: 'bid' });
+      setMode('bid');
+    } else if (initialView === 'create-listing') {
+      setForm({ ...emptyForm, saleMode: 'sale' });
+      setMode('sale');
+    } else {
+      setMode(null);
+    }
+  }, [initialView]);
   const loadListings = () => api.fishermanListings().then(setListings).catch(err => setError(err.message));
   const loadSales = () => api.fishermanSales().then(setSales).catch(err => setError(err.message));
   useEffect(() => {
@@ -84,7 +96,7 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
       event.target.value = '';
     }
   };
-  const submit = async event => { event.preventDefault(); setError(''); try { const expectedPrice = mode === 'bid' ? Number(form.expectedPrice) : Number(form.salePrice); const listing = await api.createListing({ ...form, saleMode: mode, expectedPrice, salePrice: Number(form.salePrice || expectedPrice), quantity: Number(form.quantity) }); if (mode === 'bid') await api.createAuction(listing.id, { startPrice: expectedPrice, minimumIncrement: Number(form.minimumIncrement), startTime: new Date().toISOString(), endTime: new Date(form.endTime).toISOString() }); setMessage(mode === 'bid' ? 'Bidding listing created.' : 'Sale listing created.'); setForm(emptyForm); setMode(null); setView('inventory'); loadListings(); } catch (err) { setError(err.message); } };
+  const submit = async event => { event.preventDefault(); setError(''); try { const expectedPrice = mode === 'bid' ? Number(form.expectedPrice) : Number(form.salePrice); const listing = await api.createListing({ ...form, saleMode: mode, expectedPrice, salePrice: Number(form.salePrice || expectedPrice), quantity: Number(form.quantity) }); if (mode === 'bid') await api.createAuction(listing.id, { startPrice: expectedPrice, minimumIncrement: Number(form.minimumIncrement), startTime: new Date().toISOString(), endTime: new Date(form.endTime).toISOString() }); setMessage(mode === 'bid' ? 'Bidding listing created.' : 'Sale listing created.'); setForm(emptyForm); setMode(null); onViewChange?.('inventory'); loadListings(); } catch (err) { setError(err.message); } };
   const closeBid = async id => { try { const result = await api.closeAuction(id); setMessage(result.winnerName ? `Bidding stopped. ${result.winnerName} won at ₹${Number(result.winningBid).toLocaleString()}/kg. Checkout is ready.` : 'Bidding stopped with no bids.'); loadListings(); loadSales(); } catch (err) { setError(err.message); } };
   const deleteListing = async id => { if (!window.confirm('Delete this fish listing?')) return; try { await api.deleteListing(id); setMessage('Listing deleted.'); loadListings(); } catch (err) { setError(err.message); } };
   const saveListingEdit = async (listing, changes) => {
@@ -99,7 +111,7 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
   };
   const progressOrder = async (order, status) => { setError(''); try { await api.updateOrderStatus(order.id, status); setMessage(`Order marked ${status}.`); loadSales(); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); } catch (err) { setError(err.message); } };
   const scheduleDelivery = async (order, date) => { const expectedDeliveryAt = Date.parse(`${date}T23:59:59`); if (!Number.isFinite(expectedDeliveryAt)) { setError('Choose an expected delivery date.'); return; } setError(''); try { await api.setDeliverySchedule(order.id, new Date(expectedDeliveryAt).toISOString()); setMessage('Expected delivery date saved.'); loadSales(); } catch (err) { setError(err.message); } };
-  const startPost = () => { setForm(emptyForm); setMode(null); setView('inventory'); };
+  const startPost = () => { setForm(emptyForm); setMode(null); onViewChange?.('inventory'); };
   return <main className="dashboard fisherman-view">
     <section className="fisherman-hero">
       <div className="fisherman-hero-copy">
@@ -119,13 +131,13 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
       <article><span className="fisherman-overview-icon"><Activity size={18} /></span><small>Verified sales</small><strong>₹{verifiedSales.toLocaleString()}</strong><span>Confirmed Razorpay payments</span></article>
     </section>
     <nav className="fisherman-tabs" aria-label="Fisherman dashboard">
-      <button className={view === 'inventory' ? 'active' : ''} onClick={() => { setView('inventory'); onViewChange?.('inventory'); }}><Fish size={17} /> Inventory <b>{listings.length}</b></button>
-      <button className={view === 'orders' ? 'active' : ''} onClick={() => { setView('orders'); onViewChange?.('orders'); loadSales(); }}><ClipboardList size={17} /> Buyer orders <b>{sales.length}</b></button>
-      <button className={view === 'sales' ? 'active' : ''} onClick={() => { setView('sales'); onViewChange?.('sales'); loadSales(); }}><ShoppingBag size={17} /> Selling data <b>{sales.filter(order => order.paymentStatus === 'paid' || ['processing', 'completed', 'delivered'].includes(order.orderStatus)).length}</b></button>
-      <button className={view === 'reputation' ? 'active' : ''} onClick={() => { setView('reputation'); onViewChange?.('reputation'); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); }}><CheckCircle2 size={17} /> Reputation</button>
-      <button className={view === 'demand' ? 'active' : ''} onClick={() => { setView('demand'); onViewChange?.('demand'); }}><Activity size={17} /> Demand insights</button>
-      <button className={view === 'bids' ? 'active' : ''} onClick={() => { setView('bids'); onViewChange?.('bids'); }}><Gavel size={17} /> Bid history</button>
-      <button className={view === 'transactions' ? 'active' : ''} onClick={() => { setView('transactions'); onViewChange?.('transactions'); }}><ClipboardList size={17} /> Transactions</button>
+      <NavLink to="/my-auctions" className={view === 'inventory' ? 'active' : ''}><Fish size={17} /> Inventory <b>{listings.length}</b></NavLink>
+      <NavLink to="/orders" className={view === 'orders' ? 'active' : ''} onClick={loadSales}><ClipboardList size={17} /> Buyer orders <b>{sales.length}</b></NavLink>
+      <NavLink to="/sales" className={view === 'sales' ? 'active' : ''} onClick={loadSales}><ShoppingBag size={17} /> Selling data <b>{sales.filter(order => order.paymentStatus === 'paid' || ['processing', 'completed', 'delivered'].includes(order.orderStatus)).length}</b></NavLink>
+      <NavLink to="/reputation" className={view === 'reputation' ? 'active' : ''} onClick={() => api.fishermanReputation().then(setReputation).catch(err => setError(err.message))}><CheckCircle2 size={17} /> Reputation</NavLink>
+      <NavLink to="/fisherman/demand" className={view === 'demand' ? 'active' : ''}><Activity size={17} /> Demand insights</NavLink>
+      <NavLink to="/fisherman/bids" className={view === 'bids' ? 'active' : ''}><Gavel size={17} /> Bid history</NavLink>
+      <NavLink to="/fisherman/transactions" className={view === 'transactions' ? 'active' : ''}><ClipboardList size={17} /> Transactions</NavLink>
     </nav>
     {view === 'transactions' && <TransactionHistory title="Fisherman transaction history" />}
     {view === 'reputation' && <ReputationPanel reputation={reputation} />}
@@ -133,15 +145,16 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
     {view === 'bids' && <BidMonitoring title="Auction bid history & review" />}
     {view === 'orders' && <OrdersPage orders={sales} onStatus={progressOrder} onSchedule={scheduleDelivery} />}
     {view === 'sales' && <SalesPage orders={sales} />}
+    {view === 'create-auction' && mode && <ListingForm mode={mode} form={form} meta={meta} imageUploading={imageUploading} onChange={updateForm} onImage={uploadImage} onSubmit={submit} onBack={() => onViewChange?.('inventory')} />}
+    {view === 'create-listing' && mode && <ListingForm mode={mode} form={form} meta={meta} imageUploading={imageUploading} onChange={updateForm} onImage={uploadImage} onSubmit={submit} onBack={() => onViewChange?.('inventory')} />}
     {view === 'inventory' && <>
       <section className="fisherman-inventory-tools">
         <div><p className="kicker">YOUR CATCHES</p><h2>Inventory &amp; selling</h2><p>Choose how you want buyers to purchase your next catch.</p></div>
         <div className="fisherman-sell-actions">
-          <button className="fisherman-sell-option" onClick={() => { setForm({ ...emptyForm, saleMode: 'sale' }); setMode('sale'); }}><ShoppingBag size={17} /><span><strong>Fixed price</strong><small>Sell directly</small></span></button>
-          <button className="fisherman-sell-option auction" onClick={() => { setForm({ ...emptyForm, saleMode: 'bid' }); setMode('bid'); }}><Gavel size={17} /><span><strong>Start an auction</strong><small>Invite buyer bids</small></span></button>
+          <button className="fisherman-sell-option" onClick={() => onViewChange?.('create-listing')}><ShoppingBag size={17} /><span><strong>Fixed price</strong><small>Sell directly</small></span></button>
+          <button className="fisherman-sell-option auction" onClick={() => onViewChange?.('create-auction')}><Gavel size={17} /><span><strong>Start an auction</strong><small>Invite buyer bids</small></span></button>
         </div>
       </section>
-      {mode && <ListingForm mode={mode} form={form} meta={meta} imageUploading={imageUploading} onChange={updateForm} onImage={uploadImage} onSubmit={submit} onBack={() => setMode(null)} />}
       {editingListing && <ListingEditor listing={editingListing} onClose={() => setEditingListing(null)} onSave={saveListingEdit} />}
       <div className="fisherman-inventory-lists">
         <section className="catch-list inventory-sale-list">

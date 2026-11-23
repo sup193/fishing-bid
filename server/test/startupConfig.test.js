@@ -11,14 +11,27 @@ test('production startup requires an explicit JWT secret and admin password', ()
     () => validateProductionConfig({ NODE_ENV: 'production', JWT_SECRET: 'configured' }),
     /ADMIN_PASSWORD is required in production/
   );
-  assert.doesNotThrow(() => validateProductionConfig({
+  const configured = {
     NODE_ENV: 'production',
     JWT_SECRET: 'configured',
     ADMIN_PASSWORD: 'configured',
-    RESEND_API_KEY: 'configured',
-    OTP_FROM_EMAIL: 'Fishing Bid <verification@example.test>',
+    SMTP_HOST: 'smtp.gmail.com',
+    SMTP_PORT: '465',
+    SMTP_SECURE: 'true',
+    SMTP_USER: 'verification@example.test',
+    SMTP_PASS: 'test-app-password',
+    EMAIL_FROM: 'Fishing Bid <verification@example.test>',
     OTP_HASH_SECRET: 'configured'
-  }));
+  };
+  assert.doesNotThrow(() => validateProductionConfig(configured));
+  assert.throws(
+    () => validateProductionConfig({ ...configured, SMTP_PASS: '' }),
+    /SMTP_PASS is required in production/
+  );
+  assert.throws(
+    () => validateProductionConfig({ ...configured, SMTP_PORT: 'invalid' }),
+    /SMTP_PORT must be a valid port in production/
+  );
 });
 
 test('non-production startup retains local development defaults', () => {

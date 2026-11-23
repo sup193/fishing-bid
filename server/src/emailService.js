@@ -1,18 +1,36 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
-let resendClient;
+let transporter;
 let testSender;
 
 export function setEmailSenderForTests(sender) {
   testSender = sender;
 }
 
-function getClient() {
-  if (!process.env.RESEND_API_KEY) {
-    throw Object.assign(new Error('Email verification is not configured'), { status: 503 });
+function getTransporter() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT || 465);
+  const secureValue = process.env.SMTP_SECURE === undefined
+    ? 'true'
+    : process.env.SMTP_SECURE.trim().toLowerCase();
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.EMAIL_FROM;
+  if (!user || !pass || !from) {
+    throw Object.assign(new Error('SMTP email delivery is not configured'), { status: 503 });
   }
-  if (!resendClient) resendClient = new Resend(process.env.RESEND_API_KEY);
-  return resendClient;
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || !['true', 'false'].includes(secureValue)) {
+    throw Object.assign(new Error('SMTP email configuration is invalid'), { status: 503 });
+  }
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: secureValue === 'true',
+      auth: { user, pass }
+    });
+  }
+  return transporter;
 }
 
 function escapeHtml(value) {
@@ -39,6 +57,7 @@ function otpEmailHtml(name, otp, purpose) {
       <tr><td align="center">
         <table role="presentation" width="520" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border-radius:8px;padding:32px">
           <tr><td>
+            <p style="margin:0 0 8px;color:#28796d;font-size:12px;font-weight:700;letter-spacing:2px">FISHING BID</p>
             <h1 style="margin:0 0 20px;font-size:24px">${heading}</h1>
             <p>Hello ${greetingName},</p>
             <p>${reset ? 'We received a request to reset your password.' : 'Welcome to Fishing Bid!'}</p>
@@ -64,22 +83,19 @@ export async function sendOtpEmail({ name, email, otp, purpose = 'registration' 
   const subject = reset ? 'Reset your Fishing Bid password' : 'Verify your Fishing Bid account';
   const intro = reset ? 'We received a request to reset your password.' : 'Welcome to Fishing Bid!';
   const instruction = reset ? 'Use this code to continue resetting your password:' : 'Your email verification code is:';
-  const from = process.env.OTP_FROM_EMAIL || 'Fishing Bid <onboarding@resend.dev>';
   const payload = {
-    from,
+    from: process.env.EMAIL_FROM,
     to: [email],
     subject,
     html: otpEmailHtml(greetingName, otp, purpose),
-    text: `Hello ${greetingName},\n\n${intro}\n\n${instruction}\n\n${otp}\n\nThis verification code expires in 5 minutes.\n\nDo not share this code with anyone.\n\nThank you,\nFishing Bid Team`
+    text: `Fishing Bid\n\nHello ${greetingName},\n\n${intro}\n\n${instruction}\n\n${otp}\n\nThis verification code expires in 5 minutes.\n\nDo not share this code with anyone.\n\nThank you,\nFishing Bid Team`
   };
-  if (testSender) return testSender(payload);
-
-  const { data, error } = await getClient().emails.send(payload);
-  if (error) {
-    const sendError = new Error('Could not send the verification email');
-    sendError.status = 502;
-    sendError.providerDetail = typeof error.message === 'string' ? error.message.slice(0, 300) : '';
-    throw sendError;
+  const mailTransport = testSender ? null : getTransporter();
+  try {
+    return testSender
+      ? await testSender(payload)
+      : await mailTransport.sendMail(payload);
+  } catch {
+    throw Object.assign(new Error('Could not send the verification email'), { status: 502 });
   }
-  return data;
 }

@@ -21,7 +21,7 @@ export default defineConfig({
     {
       name: 'desktop-web',
       testMatch: '**/*.web.spec.js',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:5173' }
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:5174' }
     },
     {
       name: 'mobile-expo-web',
@@ -33,9 +33,10 @@ export default defineConfig({
     {
       command: 'node server/test-support/startAuctionApi.js',
       cwd: projectRoot,
-      url: 'http://127.0.0.1:5000/api/health',
+      url: 'http://127.0.0.1:5010/api/health',
       reuseExistingServer: false,
-      timeout: 60_000
+      timeout: 60_000,
+      env: { PORT: '5010' }
     },
     {
       command: 'node server/test-support/startAuctionApi.js',
@@ -46,11 +47,12 @@ export default defineConfig({
       env: { PORT: '5001' }
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1 --port 5173',
+      command: 'npm run dev -- --host 127.0.0.1 --port 5174',
       cwd: clientDir,
-      url: 'http://127.0.0.1:5173',
-      reuseExistingServer: true,
-      timeout: 60_000
+      url: 'http://127.0.0.1:5174',
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: { VITE_API_PROXY_TARGET: 'http://127.0.0.1:5010' }
     },
     {
       command: 'npm run web -- --port 8081 --host localhost',

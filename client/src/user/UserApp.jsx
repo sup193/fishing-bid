@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
+import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
 import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
 import PricePredictionTool, { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
-
-const viewFromHash = () => {
-  const hash = window.location.hash.slice(1);
-  return ['history', 'transactions', 'prices', 'demand'].includes(hash) ? hash : 'market';
-};
 
 const fallback = [
   { id: 'demo-1', fishType: 'Tuna', quality: 'Premium', quantity: 100, location: 'Mangalore', expectedPrice: 380, salePrice: 380, saleMode: 'bid', status: 'auction', imageVerification: 'verified', description: 'Fresh morning catch.', auction: { id: 'demo-auction', startPrice: 380, currentPrice: 380, priceIncreasePercent: 0 } },
@@ -238,7 +234,10 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
   </section>;
 }
 
-export default function UserApp({ user, onAuth }) {
+export default function UserApp({ user, onAuth, view = 'market' }) {
+  const navigate = useNavigate();
+  const { id: listingId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const wishlistStorageKey = `tide_wishlist_${user?.id || 'guest'}`;
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -263,7 +262,6 @@ export default function UserApp({ user, onAuth }) {
   const [notificationError, setNotificationError] = useState('');
   const [checkout, setCheckout] = useState(null);
   const [transactionRefresh, setTransactionRefresh] = useState(0);
-  const [dashboardView, setDashboardView] = useState(viewFromHash);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [wishlist, setWishlist] = useState(() => storedWishlist(wishlistStorageKey));
   const [now, setNow] = useState(Date.now());
@@ -283,7 +281,7 @@ export default function UserApp({ user, onAuth }) {
   const [recommendationSaleMode, setRecommendationSaleMode] = useState('all');
   const [recommendationWishlistOnly, setRecommendationWishlistOnly] = useState(false);
   const [listingError, setListingError] = useState('');
-  const [demandFishType, setDemandFishType] = useState('');
+  const [demandFishType, setDemandFishType] = useState(() => searchParams.get('fishType') || '');
 
   useEffect(() => {
     let active = true;
@@ -457,12 +455,6 @@ export default function UserApp({ user, onAuth }) {
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const updateView = () => setDashboardView(viewFromHash());
-    window.addEventListener('hashchange', updateView);
-    return () => window.removeEventListener('hashchange', updateView);
-  }, []);
-
   const locationOptions = [...new Set(items.map(item => item.location).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const priceHighlights = [...items].sort((a, b) => itemPrice(a) - itemPrice(b)).slice(0, 3);
   const visible = items.filter(item => {
@@ -520,7 +512,20 @@ export default function UserApp({ user, onAuth }) {
     setMessage('');
     setBidAmount('');
     resetAuctionContext();
+    navigate(`/auctions/${encodeURIComponent(listing.id)}`);
   };
+  const closeListing = () => {
+    setSelected(null);
+    if (listingId) navigate('/auctions');
+  };
+  useEffect(() => {
+    if (!listingId || !items.length) return;
+    const listing = items.find(item => item.id === listingId || item.auction?.id === listingId);
+    if (listing && selected?.id !== listing.id) {
+      setSelected(listing);
+      resetAuctionContext();
+    }
+  }, [items, listingId, selected?.id]);
   const beginBid = item => {
     if (!user) return onAuth('login');
     openListing(item);
@@ -652,7 +657,7 @@ export default function UserApp({ user, onAuth }) {
             setMessageType('success');
             setMessage(`Payment confirmed. Order ${payment.orderNumber} is being processed.`);
             setCheckout(null);
-            setSelected(null);
+            closeListing();
           } catch (error) {
             setTransactionRefresh(value => value + 1);
             setMessageType('error');
@@ -708,9 +713,11 @@ export default function UserApp({ user, onAuth }) {
 
   const bidClosed = selected?.saleMode === 'bid' && (selected?.auction?.status === 'completed' || (selected?.auction?.endTime && new Date(selected.auction.endTime).getTime() <= now));
   const buyerView = user?.role === 'buyer';
-  const currentView = buyerView ? dashboardView : 'market';
+  const currentView = view;
+  const marketplaceView = currentView === 'market' || currentView === 'home';
+  const routeListing = listingId ? items.find(item => item.id === listingId || item.auction?.id === listingId) : null;
   return <div className={`user-shell${buyerView ? ' buyer-dashboard' : ''}`}>
-    {!user && <div className="guest-login-ticker">
+    {!user && currentView !== 'home' && <div className="guest-login-ticker">
       <div className="guest-login-ticker-window" role="status" aria-label="Log in to get more features and explore more products">
         <div className="guest-login-ticker-track" aria-hidden="true">
           <span>Log in to get more features and explore more products</span>
@@ -720,7 +727,7 @@ export default function UserApp({ user, onAuth }) {
       <button className="guest-ticker-button" onClick={() => onAuth('login')}>Log in</button>
     </div>}
     {buyerView && <>
-      <section className="buyer-overview">
+      {currentView === 'dashboard' && <section className="buyer-overview">
         <div className="buyer-welcome">
           <div>
             <p className="kicker">BUYER WORKSPACE</p>
@@ -734,31 +741,48 @@ export default function UserApp({ user, onAuth }) {
           <article className="buyer-stat"><span>Live auctions</span><strong>{loading ? '—' : activeAuctions}</strong><small>Open for bidding</small></article>
           <article className="buyer-stat"><span>Landing locations</span><strong>{loading ? '—' : landingLocations}</strong><small>Coastal ports covered</small></article>
         </div>
-      </section>
+      </section>}
       <nav className="buyer-dashboard-nav" aria-label="Buyer dashboard">
-        <a className={currentView === 'market' ? 'active' : ''} href="#market"><Search size={17} /> Marketplace</a>
-        <a className={currentView === 'demand' ? 'active' : ''} href="#demand"><Activity size={17} /> Demand insights</a>
-        <a className={currentView === 'prices' ? 'active' : ''} href="#prices"><BarChart3 size={17} /> Price estimate</a>
-        <a className={currentView === 'history' ? 'active' : ''} href="#history"><History size={17} /> Bids &amp; orders</a>
-        <a className={currentView === 'transactions' ? 'active' : ''} href="#transactions"><ReceiptText size={17} /> Transactions</a>
+        <NavLink to="/dashboard" className={currentView === 'dashboard' ? 'active' : ''}><Activity size={17} /> Dashboard</NavLink>
+        <NavLink to="/auctions" className={currentView === 'market' ? 'active' : ''}><Search size={17} /> Auctions</NavLink>
+        <NavLink to="/demand" className={currentView === 'demand' ? 'active' : ''}><Activity size={17} /> Demand insights</NavLink>
+        <NavLink to="/prices" className={currentView === 'prices' ? 'active' : ''}><BarChart3 size={17} /> Price estimate</NavLink>
+        <NavLink to="/bids" className={currentView === 'history' ? 'active' : ''}><History size={17} /> Bids &amp; orders</NavLink>
+        <NavLink to="/transactions" className={currentView === 'transactions' ? 'active' : ''}><ReceiptText size={17} /> Transactions</NavLink>
+        <NavLink to="/notifications" className={currentView === 'notifications' ? 'active' : ''}><Bell size={17} /> Notifications</NavLink>
       </nav>
-      {(notifications.length > 0 || notificationError) && <section className="buyer-notifications" aria-label="Auction notifications">
+    </>}
+    {buyerView && currentView === 'dashboard' && <main className="buyer-view buyer-dashboard-home">
+      <div className="buyer-page-heading"><div><p className="kicker">YOUR WORKSPACE</p><h2>What would you like to do?</h2><p>Open a dedicated page to explore the marketplace and manage your activity.</p></div></div>
+      <div className="buyer-home-cards">
+        <Link to="/auctions"><Search size={21} /><strong>Explore auctions</strong><span>Browse seafood and live listings</span></Link>
+        <Link to="/bids"><History size={21} /><strong>Bids &amp; orders</strong><span>Track bids and purchases</span></Link>
+        <Link to="/transactions"><ReceiptText size={21} /><strong>Transactions</strong><span>Review your payment history</span></Link>
+        <Link to="/notifications"><Bell size={21} /><strong>Notifications</strong><span>{notifications.filter(item => !item.read).length} unread updates</span></Link>
+        <Link to="/prices"><BarChart3 size={21} /><strong>Price estimate</strong><span>Check current price guidance</span></Link>
+        <Link to="/demand"><Activity size={21} /><strong>Demand insights</strong><span>See market demand outlook</span></Link>
+        <Link to="/profile"><ShoppingBag size={21} /><strong>Your profile</strong><span>Review account information</span></Link>
+      </div>
+    </main>}
+    {buyerView && currentView === 'notifications' && <main className="buyer-view" id="notifications">
+      <div className="buyer-page-heading"><div><p className="kicker">STAY UP TO DATE</p><h2>Notifications</h2><p>Updates about your bids, auctions, and orders.</p></div><Bell size={23} /></div>
+      {notificationError && <p className="notice" role="alert">{notificationError}</p>}
+      <section className="buyer-notifications" aria-label="Auction notifications">
         <div className="buyer-notifications-heading"><Bell size={17} /><strong>Auction notifications</strong><span>{notifications.filter(item => !item.read).length} unread</span></div>
-        {notificationError && <p className="notice" role="alert">{notificationError}</p>}
-        {notifications.slice(0, 4).map(notification => <article className={`buyer-notification${notification.read ? ' is-read' : ''}`} key={notification.id}>
+        {notifications.map(notification => <article className={`buyer-notification${notification.read ? ' is-read' : ''}`} key={notification.id}>
           <div><strong>{notification.title}</strong><p>{notification.message}</p><small>{new Date(notification.createdAt).toLocaleString()}</small></div>
           {!notification.read && <button type="button" onClick={() => markNotificationRead(notification)} aria-label={`Mark read: ${notification.title}`}>Mark read</button>}
         </article>)}
-      </section>}
-    </>}
-    {currentView === 'market' && <>
-      {!user && <section className="guest-hero">
+        {!notifications.length && !notificationError && <p className="empty">You’re all caught up. New auction and order updates will appear here.</p>}
+      </section>
+    </main>}
+    {marketplaceView && !user && currentView === 'home' && <section className="guest-hero">
         <div className="guest-hero-copy">
           <span className="guest-eyebrow"><Waves size={15} /> TIDEMARKET · YOUR COASTAL MARKETPLACE</span>
           <h1>From Our Coast,<br /><em>Fresh to Your Table.</em></h1>
           <p>Discover responsibly sourced seafood, connect with local fishers, and bring the day’s finest catch straight to your table.</p>
           <div className="guest-hero-actions">
-            <a className="button guest-primary" href="#featured-catches">See featured catches <ArrowUpRight size={18} /></a>
+            <Link className="button guest-primary" to="/auctions">Explore auctions <ArrowUpRight size={18} /></Link>
             <button className="guest-secondary" onClick={() => setShowBiddingGuide(true)}>How bidding works</button>
           </div>
           <div className="guest-trust"><span><i /> Fresh catches, listed daily</span><span><i /> Fair trade, coast to coast</span></div>
@@ -769,6 +793,12 @@ export default function UserApp({ user, onAuth }) {
           <div className="guest-art-caption"><strong>Today's catch,<br />straight from the coast.</strong><span>Local fishermen · fair prices</span></div>
         </div>
       </section>}
+    {marketplaceView && !user && currentView === 'home' && <section className="guest-home-benefits">
+      <p className="kicker">FRESH, FAIR, CONNECTED</p><h2>A better way to buy from the coast.</h2>
+      <p>TideMarket brings seafood buyers and local fishermen together in one easy-to-use marketplace.</p>
+      <Link className="button guest-primary" to="/auctions">Browse the marketplace <ArrowUpRight size={18} /></Link>
+    </section>}
+    {marketplaceView && <>
       {user ? <section className="market buyer-market" id="market">
         {listingError && <p className="notice market-listing-error" role="status">Could not refresh marketplace listings: {listingError}. Showing the latest available listings.</p>}
         <section className="market-pulse-section" aria-label="Live market pulse">
@@ -801,7 +831,7 @@ export default function UserApp({ user, onAuth }) {
               const categoryListings = items.filter(category.matches);
               const categoryPhoto = categoryListings.find(item => item.imageUrl)?.imageUrl || category.image;
               const count = categoryListings.length;
-              return <button key={category.name} className={`seafood-category-card${selectedCategory === category.name ? ' selected' : ''}`} aria-pressed={selectedCategory === category.name} onClick={() => { setSelectedCategory(selectedCategory === category.name ? 'All' : category.name); window.requestAnimationFrame(() => document.querySelector('#fresh-catch-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }}>
+              return <button key={category.name} className={`seafood-category-card${selectedCategory === category.name ? ' selected' : ''}`} aria-pressed={selectedCategory === category.name} onClick={() => setSelectedCategory(selectedCategory === category.name ? 'All' : category.name)}>
                 <img src={categoryPhoto} alt="" onError={event => { event.currentTarget.onerror = null; event.currentTarget.src = category.image; }} />
                 <span className="seafood-category-shade" aria-hidden="true" />
                 <span className="seafood-category-topline"><span>FRESH FROM THE COAST</span><ArrowUpRight size={16} aria-hidden="true" /></span>
@@ -837,7 +867,7 @@ export default function UserApp({ user, onAuth }) {
         {message && !selected && <p className={messageType === 'error' ? 'notice' : 'success-notice'}>{message}</p>}
         <section className="market-listing-section" aria-labelledby="fresh-catch-title">
           <div className="market-section-title"><div><p className="kicker">MARKET LISTINGS</p><h2 id="fresh-catch-title">Available Catch</h2></div><span>{freshCatchItems.length} available</span></div>
-          {demandFishType && <p className="demand-filter-notice">Showing {demandFishType} from demand insights. <button type="button" onClick={() => setDemandFishType('')}>Clear filter</button></p>}
+          {demandFishType && <p className="demand-filter-notice">Showing {demandFishType} from demand insights. <button type="button" onClick={() => { setDemandFishType(''); setSearchParams({}); }}>Clear filter</button></p>}
           <p className="market-section-description">Fixed-price catches and completed auction listings from local fishermen. Quality grades are seller-reported.</p>
           <div className="fish-grid">
             {loading ? <p className="empty">Scanning the morning catch...</p> : freshCatchItems.map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
@@ -862,7 +892,8 @@ export default function UserApp({ user, onAuth }) {
             <small>{fisherman.listingCount} {fisherman.listingCount === 1 ? 'catch' : 'catches'}</small>
           </article>)}</div> : <p className="empty">Fishermen will appear here when they publish available catches.</p>}
         </section>
-      </section> : <section className="market guest-market" id="market">
+      </section> : currentView === 'market' ? <section className="market guest-market" id="market">
+        <>
         <MarketTrendChart
           data={trendData}
           loading={trendLoading}
@@ -885,19 +916,8 @@ export default function UserApp({ user, onAuth }) {
             {!loading && !guestPreviewItems.length && <p className="empty buyer-no-results">New catches will appear here as local fishermen publish listings.</p>}
           </div>
         </section>
-        <section className="guest-benefits" aria-labelledby="guest-benefits-title">
-          <div className="guest-benefits-heading"><p className="kicker">FRESH, FAIR, CONNECTED</p><h2 id="guest-benefits-title">A better way to buy from the coast.</h2><p>TideMarket brings seafood buyers and local fishermen together in one easy-to-use marketplace.</p></div>
-          <div className="guest-benefit-grid">
-            <article><span><Waves size={20} /></span><h3>Fresh catches</h3><p>Discover seafood listed by local fishermen after each landing.</p></article>
-            <article><span><CircleDollarSign size={20} /></span><h3>Clear prices</h3><p>Compare fixed-price listings and follow open bids in one place.</p></article>
-            <article><span><Gavel size={20} /></span><h3>Fair bidding</h3><p>Join live auctions and keep track of your bids and orders.</p></article>
-          </div>
-        </section>
-        <section className="guest-login-cta">
-          <div><p className="kicker">READY TO EXPLORE?</p><h2>Log in for more features and products.</h2><p>Browse the full marketplace, place bids, and manage your orders with a TideMarket account.</p></div>
-          <button className="button guest-primary" onClick={() => onAuth('login')}>Log in to TideMarket <ArrowUpRight size={18} /></button>
-        </section>
-      </section>}
+        </>
+      </section> : null}
     </>}
     {buyerView && currentView === 'history' && <main className="buyer-view" id="history">
       <div className="buyer-page-heading"><div><p className="kicker">YOUR ACTIVITY</p><h2>Bids &amp; orders</h2><p>Review your auction activity and purchase status.</p></div><History size={23} /></div>
@@ -915,8 +935,7 @@ export default function UserApp({ user, onAuth }) {
       <DemandForecastPanel role="buyer" listings={items} onExploreFish={fishType => {
         setDemandFishType(fishType);
         setSelectedCategory('All');
-        window.location.hash = '#market';
-        window.requestAnimationFrame(() => document.querySelector('#fresh-catch-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        navigate(`/auctions?fishType=${encodeURIComponent(fishType)}`);
       }} />
     </main>}
     {showBiddingGuide && <div className="modal-backdrop bidding-guide-backdrop" onClick={() => setShowBiddingGuide(false)}>
@@ -934,9 +953,13 @@ export default function UserApp({ user, onAuth }) {
         </div>
       </section>
     </div>}
-    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}>
-      <div className={`modal${selected.saleMode === 'bid' ? ' auction-detail-modal' : ''}`} onClick={event => event.stopPropagation()}>
-        <button className="close" onClick={() => setSelected(null)}>×</button>
+    {listingId && !routeListing && !loading && <main className="buyer-view auction-detail-page">
+      <button className="back-button" type="button" onClick={closeListing}>← Back to auctions</button>
+      <section className="panel auction-detail-content"><h1>Catch not found</h1><p>This auction or listing is no longer available.</p></section>
+    </main>}
+    {selected && listingId && (selected.id === listingId || selected.auction?.id === listingId) && <main className="buyer-view auction-detail-page">
+      <button className="back-button" type="button" onClick={closeListing}>← Back to auctions</button>
+      <section className={`panel auction-detail-content${selected.saleMode === 'bid' ? ' auction-detail-modal' : ''}`}>
         <ListingPhoto className="detail-photo" item={selected} alt={`${selected.fishType} catch`} />
         <p className="kicker">{selected.saleMode === 'bid' ? bidClosed ? 'BID CLOSED' : 'LIVE BIDDING' : 'DIRECT SALE'}</p>
         <h2>{selected.fishType}, {String(selected.quality || 'ungraded').toLowerCase()} seller grade</h2>
@@ -1046,8 +1069,8 @@ export default function UserApp({ user, onAuth }) {
               : <p className="form-hint">Bidding has stopped. The winning buyer can complete checkout.</p>}
         {selected.imageVerification === 'verified' && <p className="verification">Image status marked complete · not a species, freshness, or food-safety check</p>}
         {message && <p className={messageType === 'success' ? 'success-notice' : 'notice'} role="status">{message}</p>}
-      </div>
-    </div>}
+      </section>
+    </main>}
     {checkout && <CheckoutForm type={checkout.type} onClose={() => setCheckout(null)} onSubmit={startPayment} />}
   </div>;
 }

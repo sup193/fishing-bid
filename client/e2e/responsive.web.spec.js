@@ -4,9 +4,9 @@ const widths = [320, 360, 390, 768, 1280, 1366, 1440, 1920];
 const password = 'auction-test-password';
 
 async function login(page, email) {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Log in' }).first().click();
+  await page.goto('/login');
   const modal = page.locator('.auth-modal');
+  await expect(modal).toBeVisible();
   await modal.locator('input[name="email"]').fill(email);
   await modal.locator('input[name="password"]').fill(password);
   await modal.getByRole('button', { name: 'Log in' }).click();
@@ -27,7 +27,19 @@ async function expectNoHorizontalOverflow(page, width, surface) {
     clientWidth: document.documentElement.clientWidth,
     documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)
   }));
-  expect(size.documentWidth, `${surface} overflows at ${width}px`).toBeLessThanOrEqual(size.clientWidth);
+  const overflowingElements = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
+    .map(element => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        tag: element.tagName.toLowerCase(),
+        className: element.getAttribute('class') || '',
+        right: Math.round(bounds.right),
+        width: Math.round(bounds.width)
+      };
+    })
+    .filter(element => element.right > window.innerWidth + 1)
+    .slice(0, 10));
+  expect(size.documentWidth, `${surface} overflows at ${width}px: ${JSON.stringify(overflowingElements)}`).toBeLessThanOrEqual(size.clientWidth);
 }
 
 test('guest and buyer, fisherman, and admin workspaces fit the requested viewport widths', async ({ page }) => {
@@ -37,7 +49,7 @@ test('guest and buyer, fisherman, and admin workspaces fit the requested viewpor
   for (const width of widths) await expectNoHorizontalOverflow(page, width, 'guest marketplace');
 
   await login(page, 'buyer-1@auction.test');
-  await expect(page.getByRole('heading', { name: 'Welcome back, Test.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome back, Test Buyer 1.' })).toBeVisible();
   for (const width of widths) await expectNoHorizontalOverflow(page, width, 'buyer marketplace');
 
   await logout(page, 'buyer');

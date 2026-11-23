@@ -2,8 +2,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
 async function login(page, email) {
-  await page.getByRole('button', { name: 'Log in' }).first().click();
+  await page.goto('/login');
   const modal = page.locator('.auth-modal');
+  await expect(modal).toBeVisible();
   await modal.locator('input[name="email"]').fill(email);
   await modal.locator('input[name="password"]').fill('auction-test-password');
   await modal.getByRole('button', { name: 'Log in' }).click();
@@ -40,6 +41,7 @@ test('guest and role workspaces have no WCAG 2.1 A/AA axe violations', async ({ 
   await scan('guest');
 
   await login(page, 'buyer-1@auction.test');
+  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
   await expect(page.locator('.buyer-dashboard .market-product-card').first()).toBeVisible();
   await scan('buyer');
   await logout(page, 'buyer');

@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 
 async function login(page, email) {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Log in' }).first().click();
+  await page.goto('/login');
   const modal = page.locator('.auth-modal');
+  await expect(modal).toBeVisible();
   await modal.locator('input[name="email"]').fill(email);
   await modal.locator('input[name="password"]').fill('auction-test-password');
   await modal.getByRole('button', { name: 'Log in' }).click();
-  await expect(page.getByRole('heading', { name: 'Welcome back, Test.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Welcome back,/ })).toBeVisible();
+  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
 }
 
 async function openAuction(page, fishType, region = 'Live Auctions') {
@@ -47,7 +48,7 @@ test('buyers see live bidding, errors, proxy bidding, history and outbid notices
 
   const secondContext = await browser.newContext({
     viewport: { width: 1280, height: 900 },
-    baseURL: 'http://127.0.0.1:5173'
+    baseURL: 'http://127.0.0.1:5174'
   });
   const secondBuyer = await secondContext.newPage();
   await login(secondBuyer, 'buyer-2@auction.test');
@@ -60,6 +61,7 @@ test('buyers see live bidding, errors, proxy bidding, history and outbid notices
   const activeBidders = secondDetail.locator('.auction-live-summary article').filter({ hasText: 'Active bidders' });
   await expect(activeBidders).toContainText('2');
   await expect(secondDetail.locator('.auction-bid-row')).toHaveCount(2);
+  await page.locator('.topbar nav').getByRole('link', { name: 'Notifications' }).click();
   await expect(page.getByText('You have been outbid')).toBeVisible({ timeout: 20_000 });
   await secondContext.close();
 });

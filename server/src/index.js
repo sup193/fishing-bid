@@ -113,8 +113,16 @@ export function validateProductionConfig(env = process.env) {
   if (env.NODE_ENV !== 'production') return;
   if (!env.JWT_SECRET) throw new Error('JWT_SECRET is required in production');
   if (!env.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is required in production');
-  if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is required in production');
-  if (!env.OTP_FROM_EMAIL) throw new Error('OTP_FROM_EMAIL is required in production');
+  for (const key of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM']) {
+    if (!env[key]) throw new Error(`${key} is required in production`);
+  }
+  const smtpPort = Number(env.SMTP_PORT);
+  if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
+    throw new Error('SMTP_PORT must be a valid port in production');
+  }
+  if (!['true', 'false'].includes(String(env.SMTP_SECURE).toLowerCase())) {
+    throw new Error('SMTP_SECURE must be true or false in production');
+  }
   if (!env.OTP_HASH_SECRET) throw new Error('OTP_HASH_SECRET is required in production');
 }
 

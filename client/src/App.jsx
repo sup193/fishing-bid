@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Activity, ClipboardList, Eye, EyeOff, Fish, Gavel, LogIn, LogOut, Mail, MapPin, Menu, ReceiptText, ShipWheel, ShoppingBag, Store, UserRound, Users, X } from 'lucide-react';
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api } from './api.js';
 import UserApp from './user/UserApp.jsx';
 import AdminDashboard from './admin/AdminDashboard.jsx';
 import FishermanDashboard from './fisherman/FishermanDashboard.jsx';
 
 export default function App() {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('tide_user') || 'null'));
+  const [user, setUser] = useState(() => localStorage.getItem('tide_token')
+    ? JSON.parse(localStorage.getItem('tide_user') || 'null')
+    : null);
   const [authMode, setAuthMode] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(() => Boolean(localStorage.getItem('tide_token')));
   const [menu, setMenu] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
-  const [fishermanView, setFishermanView] = useState('inventory');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (location.pathname === '/login') setAuthMode('login');
+    else if (location.pathname === '/register') setAuthMode('register');
+    else setAuthMode(null);
+  }, [location.pathname]);
 
   const auth = async form => {
     const result = authMode === 'login' ? await api.login(form) : await api.register(form);
@@ -23,10 +33,16 @@ export default function App() {
     localStorage.setItem('tide_user', JSON.stringify(result.user));
     setUser(result.user);
     setAuthMode(null);
+    navigate('/dashboard', { replace: true });
   };
   useEffect(() => {
     const token = localStorage.getItem('tide_token');
-    if (!token) return;
+    if (!token) {
+      localStorage.removeItem('tide_user');
+      setUser(null);
+      setSessionLoading(false);
+      return;
+    }
     api.me()
       .then(result => {
         localStorage.setItem('tide_user', JSON.stringify(result.user));
@@ -38,89 +54,174 @@ export default function App() {
           localStorage.removeItem('tide_user');
           setUser(null);
         }
-      });
+      })
+      .finally(() => setSessionLoading(false));
   }, []);
   const logout = () => {
     localStorage.removeItem('tide_token');
     localStorage.removeItem('tide_user');
     setUser(null);
+    navigate('/login', { replace: true });
   };
-  const rolePage = user?.role === 'admin'
-    ? <AdminDashboard />
-    : user?.role === 'fisherman'
-      ? <FishermanDashboard initialView={fishermanView} onViewChange={setFishermanView} />
-      : <UserApp user={user} onAuth={setAuthMode} />;
+  const openAuth = mode => navigate(mode === 'register' ? '/register' : '/login');
+  const homeForUser = user?.role === 'admin' ? '/admin' : '/dashboard';
+  const routeView = view => <RouteGuard user={user} loading={sessionLoading}>
+    {user?.role === 'buyer'
+      ? <UserApp user={user} onAuth={openAuth} view={view} />
+      : user?.role === 'fisherman'
+        ? <FishermanDashboard initialView={view} onViewChange={nextView => navigate(fishermanPath(nextView))} />
+        : <AdminDashboard initialView={view} />}
+  </RouteGuard>;
+  const buyerRoute = view => <RouteGuard user={user} loading={sessionLoading} roles={['buyer']}>
+    <UserApp user={user} onAuth={openAuth} view={view} />
+  </RouteGuard>;
+  const fishermanRoute = view => <RouteGuard user={user} loading={sessionLoading} roles={['fisherman']}>
+    <FishermanDashboard initialView={view} onViewChange={nextView => navigate(fishermanPath(nextView))} />
+  </RouteGuard>;
+  const adminRoute = view => <RouteGuard user={user} loading={sessionLoading} roles={['admin']}>
+    <AdminDashboard initialView={view} />
+  </RouteGuard>;
+  const guestOrBuyerRoute = view => user && user.role !== 'buyer'
+    ? <Navigate to={homeForUser} replace />
+    : <UserApp user={user?.role === 'buyer' ? user : null} onAuth={openAuth} view={view} />;
 
   return <>
     <header className="topbar">
-      <a className="brand" href="/"><span className="brand-mark"><ShipWheel size={20} /></span>Tide<span>Market</span></a>
+      <Link className="brand" to="/"><span className="brand-mark"><ShipWheel size={20} /></span>Tide<span>Market</span></Link>
       <button className="mobile-menu" onClick={() => setMenu(!menu)} aria-label={menu ? 'Close navigation' : 'Open navigation'}>{menu ? <X /> : <Menu />}</button>
       <nav className={menu ? 'open' : ''}>
-        {user?.role !== 'buyer' && user?.role !== 'admin' && user?.role !== 'fisherman' && <a href="#market" onClick={() => setMenu(false)}>Marketplace</a>}
-        {user?.role === 'buyer' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open buyer profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}
-        {user?.role === 'admin' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open admin profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}
-        {user
-          ? <>{user.role === 'fisherman' && <button className="user-name profile-trigger" onClick={() => setShowProfile(true)} aria-label={`Open fisherman profile for ${user.name}`}><UserRound size={15} /> {user.name}</button>}{user.role !== 'buyer' && user.role !== 'fisherman' && user.role !== 'admin' && <span className="user-name"><UserRound size={15} /> {user.name}</span>}{user.role !== 'buyer' && user.role !== 'fisherman' && <button className="text-button" onClick={logout}>Log out</button>}</>
-          : <><button className="button dark" onClick={() => setAuthMode('login')}><LogIn size={16} /> Log in</button><button className="text-button" onClick={() => setAuthMode('register')}>Sign up</button></>}
+        {!user && <><NavLink to="/" onClick={() => setMenu(false)}>Home</NavLink><NavLink to="/auctions" onClick={() => setMenu(false)}>Auctions</NavLink><button className="button dark" onClick={() => { setMenu(false); openAuth('login'); }}><LogIn size={16} /> Log in</button><button className="text-button" onClick={() => { setMenu(false); openAuth('register'); }}>Sign up</button></>}
+        {user?.role === 'buyer' && <><NavLink to="/dashboard" onClick={() => setMenu(false)}>Dashboard</NavLink><NavLink to="/auctions" onClick={() => setMenu(false)}>Auctions</NavLink><NavLink to="/bids" onClick={() => setMenu(false)}>My bids</NavLink><NavLink to="/notifications" onClick={() => setMenu(false)}>Notifications</NavLink></>}
+        {user?.role === 'fisherman' && <><NavLink to="/dashboard" onClick={() => setMenu(false)}>Dashboard</NavLink><NavLink to="/my-auctions" onClick={() => setMenu(false)}>My auctions</NavLink><NavLink to="/create-auction" onClick={() => setMenu(false)}>Create auction</NavLink><NavLink to="/orders" onClick={() => setMenu(false)}>Orders</NavLink></>}
+        {user?.role === 'admin' && <><NavLink to="/admin" onClick={() => setMenu(false)}>Admin dashboard</NavLink><NavLink to="/admin/listings" onClick={() => setMenu(false)}>Listings</NavLink><NavLink to="/admin/requests" onClick={() => setMenu(false)}>Buyer requests</NavLink></>}
+        {user && <><button className="user-name profile-trigger" onClick={() => { setMenu(false); navigate('/profile'); }} aria-label={`Open ${user.role} profile for ${user.name}`}><UserRound size={15} /> {user.name}</button><button className="text-button" onClick={() => { setMenu(false); logout(); }}>Log out</button></>}
       </nav>
     </header>
-    {rolePage}
-    {showProfile && user && <ProfileDialog user={user} onClose={() => setShowProfile(false)} onLogout={() => { logout(); setShowProfile(false); }} onNavigate={view => { setFishermanView(view); setShowProfile(false); }} />}
-    {authMode && <AuthModal mode={authMode} onClose={() => setAuthMode(null)} onSwitch={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} onSubmit={auth} onAuthenticated={completeAuthentication} />}
+    <Routes>
+      <Route path="/" element={user ? <Navigate to={homeForUser} replace /> : <UserApp user={null} onAuth={openAuth} view="home" />} />
+      <Route path="/login" element={user ? <Navigate to={homeForUser} replace /> : <UserApp user={null} onAuth={openAuth} view="home" />} />
+      <Route path="/register" element={user ? <Navigate to={homeForUser} replace /> : <UserApp user={null} onAuth={openAuth} view="home" />} />
+      <Route path="/dashboard" element={routeView(user?.role === 'fisherman' ? 'inventory' : user?.role === 'admin' ? 'fishermen' : 'dashboard')} />
+      <Route path="/auctions" element={guestOrBuyerRoute('market')} />
+      <Route path="/auctions/:id" element={guestOrBuyerRoute('market')} />
+      <Route path="/profile" element={<RouteGuard user={user} loading={sessionLoading}><ProfilePage user={user} onLogout={logout} /></RouteGuard>} />
+      <Route path="/bids" element={user?.role === 'fisherman' ? fishermanRoute('bids') : user?.role === 'admin' ? adminRoute('bids') : buyerRoute('history')} />
+      <Route path="/transactions" element={user?.role === 'fisherman' ? fishermanRoute('transactions') : user?.role === 'admin' ? adminRoute('transactions') : buyerRoute('transactions')} />
+      <Route path="/prices" element={user?.role === 'admin' ? adminRoute('trust') : user?.role === 'fisherman' ? fishermanRoute('inventory') : buyerRoute('prices')} />
+      <Route path="/demand" element={user?.role === 'admin' ? adminRoute('demand') : user?.role === 'fisherman' ? fishermanRoute('demand') : buyerRoute('demand')} />
+      <Route path="/notifications" element={buyerRoute('notifications')} />
+      <Route path="/my-auctions" element={fishermanRoute('inventory')} />
+      <Route path="/create-auction" element={fishermanRoute('create-auction')} />
+      <Route path="/create-listing" element={fishermanRoute('create-listing')} />
+      <Route path="/orders" element={fishermanRoute('orders')} />
+      <Route path="/sales" element={fishermanRoute('sales')} />
+      <Route path="/reputation" element={fishermanRoute('reputation')} />
+      <Route path="/fisherman/bids" element={fishermanRoute('bids')} />
+      <Route path="/fisherman/transactions" element={fishermanRoute('transactions')} />
+      <Route path="/fisherman/demand" element={fishermanRoute('demand')} />
+      <Route path="/admin" element={adminRoute('fishermen')} />
+      <Route path="/admin/fishermen" element={adminRoute('fishermen')} />
+      <Route path="/admin/fishermen/:id" element={adminRoute('fishermen')} />
+      <Route path="/admin/listings" element={adminRoute('listings')} />
+      <Route path="/admin/requests" element={adminRoute('requests')} />
+      <Route path="/admin/bids" element={adminRoute('bids')} />
+      <Route path="/admin/transactions" element={adminRoute('transactions')} />
+      <Route path="/admin/trust" element={adminRoute('trust')} />
+      <Route path="/admin/demand" element={adminRoute('demand')} />
+      <Route path="/admin/auctions" element={adminRoute('auctions')} />
+      <Route path="*" element={<NotFound user={user} />} />
+    </Routes>
+    {authMode && <AuthModal mode={authMode} onClose={() => navigate(user ? homeForUser : '/')} onSwitch={() => openAuth(authMode === 'login' ? 'register' : 'login')} onSubmit={auth} onAuthenticated={completeAuthentication} />}
   </>;
 }
-function ProfileDialog({ user, onClose, onLogout, onNavigate }) {
-  const fisherman = user.role === 'fisherman';
+
+function RouteGuard({ user, loading, roles, children }) {
+  const location = useLocation();
+  if (loading) return <main className="dashboard route-loading" role="status">Restoring your session…</main>;
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to={user.role === 'admin' ? '/admin' : '/dashboard'} replace />;
+  }
+  return children;
+}
+
+function fishermanPath(view) {
+  return ({
+    inventory: '/my-auctions',
+    'create-auction': '/create-auction',
+    'create-listing': '/create-listing',
+    orders: '/orders',
+    sales: '/sales',
+    reputation: '/reputation',
+    demand: '/fisherman/demand',
+    bids: '/fisherman/bids',
+    transactions: '/fisherman/transactions'
+  })[view] || '/my-auctions';
+}
+
+function ProfilePage({ user, onLogout }) {
   const admin = user.role === 'admin';
+  const fisherman = user.role === 'fisherman';
   const name = user.name || 'TideMarket member';
   const initials = name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+  const shortcuts = admin
+    ? [
+      ['/admin/fishermen', <Users size={17} />, 'Manage fishermen', 'Review partner accounts'],
+      ['/admin/listings', <Store size={17} />, 'Marketplace listings', 'Review published catches'],
+      ['/admin/requests', <ClipboardList size={17} />, 'Buyer requests', 'Approve buyer signups'],
+      ['/admin/bids', <Gavel size={17} />, 'Bid review', 'Review auction activity']
+    ]
+    : fisherman
+      ? [
+        ['/my-auctions', <Fish size={17} />, 'Catch inventory', 'Manage sale and bidding listings'],
+        ['/orders', <ShoppingBag size={17} />, 'Buyer orders', 'Review orders and fulfillment'],
+        ['/fisherman/bids', <Gavel size={17} />, 'Auction activity', 'Follow bids and auction history'],
+        ['/fisherman/transactions', <ReceiptText size={17} />, 'Transactions', 'Review payment activity']
+      ]
+      : [
+        ['/auctions', <Fish size={17} />, 'Explore seafood', 'Browse catches and live auctions'],
+        ['/bids', <Gavel size={17} />, 'Bids & orders', 'Review marketplace activity'],
+        ['/transactions', <ReceiptText size={17} />, 'Transactions', 'Check your payment status']
+      ];
 
-  return <div className="modal-backdrop profile-backdrop" onClick={onClose}>
-    <section className={`profile-dialog profile-dialog-${admin ? 'admin' : fisherman ? 'fisherman' : 'buyer'}`} role="dialog" aria-modal="true" aria-labelledby="profile-title" onClick={event => event.stopPropagation()}>
-      <button className="close profile-close" onClick={onClose} aria-label="Close profile"><X size={20} /></button>
-      <div className="profile-banner">
-        <span className="profile-avatar">{initials || <UserRound size={28} />}</span>
-        <div className="profile-identity">
-          <p className="profile-eyebrow">{admin ? 'ADMIN PROFILE' : fisherman ? 'FISHERMAN PROFILE' : 'BUYER PROFILE'}</p>
-          <h2 id="profile-title">{name}</h2>
-          <span className="profile-role-badge">{admin ? <ShipWheel size={14} /> : fisherman ? <Fish size={14} /> : <ShoppingBag size={14} />}{admin ? 'Marketplace admin' : fisherman ? 'Coastal seller' : 'Seafood buyer'}</span>
-        </div>
-        <span className="profile-wave-mark" aria-hidden="true"><Activity size={33} /></span>
+  return <main className={`dashboard profile-page profile-page-${admin ? 'admin' : fisherman ? 'fisherman' : 'buyer'}`}>
+    <section className="profile-banner">
+      <span className="profile-avatar">{initials || <UserRound size={28} />}</span>
+      <div className="profile-identity">
+        <p className="profile-eyebrow">{admin ? 'ADMIN PROFILE' : fisherman ? 'FISHERMAN PROFILE' : 'BUYER PROFILE'}</p>
+        <h1>{name}</h1>
+        <span className="profile-role-badge">{admin ? <ShipWheel size={14} /> : fisherman ? <Fish size={14} /> : <ShoppingBag size={14} />}{admin ? 'Marketplace admin' : fisherman ? 'Coastal seller' : 'Seafood buyer'}</span>
       </div>
-      <div className="profile-content">
-        <div className="profile-details">
-          <article><span className="profile-detail-icon"><Mail size={17} /></span><div><small>Email address</small><strong>{user.email || 'Not provided'}</strong></div></article>
-          {(user.location || user.phone) && <article><span className="profile-detail-icon"><MapPin size={17} /></span><div><small>{user.location ? 'Port or location' : 'Phone number'}</small><strong>{user.location || user.phone}</strong></div></article>}
-          <article><span className="profile-detail-icon"><UserRound size={17} /></span><div><small>Account type</small><strong>{admin ? 'Admin account' : fisherman ? 'Fisherman account' : 'Buyer account'}</strong></div></article>
-        </div>
-        <div className="profile-features">
-          <p className="profile-section-label">{admin ? 'YOUR ADMIN TOOLS' : fisherman ? 'YOUR FISHERMAN TOOLS' : 'YOUR BUYER SHORTCUTS'}</p>
-          <p className="profile-features-note">{admin ? 'Control the marketplace, review buyer requests, and keep the coastal network moving.' : fisherman ? 'These shortcuts open your inventory, buyer orders, auction history, or payment records.' : 'These shortcuts take you straight to the marketplace, your bids and orders, or payment records.'}</p>
-          {admin
-            ? <div className="profile-feature-grid">
-              <button type="button" onClick={onClose}><Users size={17} /><span><strong>Manage fishermen</strong><small>Open the network view for partner accounts</small></span></button>
-              <button type="button" onClick={onClose}><Store size={17} /><span><strong>Marketplace listings</strong><small>Review live catches and remove listings</small></span></button>
-              <button type="button" onClick={onClose}><ClipboardList size={17} /><span><strong>Buyer requests</strong><small>Approve or reject new buyer signups</small></span></button>
-              <button type="button" onClick={onClose}><Gavel size={17} /><span><strong>Bid review</strong><small>Check auction activity and bidding patterns</small></span></button>
-            </div>
-            : fisherman
-              ? <div className="profile-feature-grid">
-                <button onClick={() => onNavigate('inventory')}><Fish size={17} /><span><strong>Catch inventory</strong><small>Manage sale and bidding listings</small></span></button>
-                <button onClick={() => onNavigate('orders')}><ShoppingBag size={17} /><span><strong>Buyer orders</strong><small>Review orders and fulfillment</small></span></button>
-                <button onClick={() => onNavigate('bids')}><Gavel size={17} /><span><strong>Auction activity</strong><small>Follow bids and auction history</small></span></button>
-                <button onClick={() => onNavigate('transactions')}><ReceiptText size={17} /><span><strong>Transactions</strong><small>Review payment activity</small></span></button>
-              </div>
-              : <div className="profile-feature-grid">
-                <a href="#market" onClick={onClose}><Fish size={17} /><span><strong>Explore seafood</strong><small>Browse catches and live auctions</small></span></a>
-                <a href="#history" onClick={onClose}><Gavel size={17} /><span><strong>Bids &amp; orders</strong><small>Review your marketplace activity</small></span></a>
-                <a href="#transactions" onClick={onClose}><ReceiptText size={17} /><span><strong>Transactions</strong><small>Check your payment status</small></span></a>
-              </div>}
-        </div>
-        <button className="profile-logout" onClick={onLogout}><LogOut size={16} /> Log out of TideMarket</button>
-      </div>
+      <span className="profile-wave-mark" aria-hidden="true"><Activity size={33} /></span>
     </section>
-  </div>;
+    <section className="panel profile-content">
+      <div className="profile-details">
+        <article><span className="profile-detail-icon"><Mail size={17} /></span><div><small>Email address</small><strong>{user.email || 'Not provided'}</strong></div></article>
+        {(user.location || user.phone) && <article><span className="profile-detail-icon"><MapPin size={17} /></span><div><small>{user.location ? 'Port or location' : 'Phone number'}</small><strong>{user.location || user.phone}</strong></div></article>}
+        <article><span className="profile-detail-icon"><UserRound size={17} /></span><div><small>Account type</small><strong>{admin ? 'Admin account' : fisherman ? 'Fisherman account' : 'Buyer account'}</strong></div></article>
+      </div>
+      <div className="profile-features">
+        <p className="profile-section-label">{admin ? 'YOUR ADMIN TOOLS' : fisherman ? 'YOUR FISHERMAN TOOLS' : 'YOUR BUYER SHORTCUTS'}</p>
+        <div className="profile-feature-grid">
+          {shortcuts.map(([to, icon, title, description]) => <Link key={to} to={to}>
+            {icon}<span><strong>{title}</strong><small>{description}</small></span>
+          </Link>)}
+        </div>
+      </div>
+      <button className="profile-logout" onClick={onLogout}><LogOut size={16} /> Log out of TideMarket</button>
+    </section>
+  </main>;
 }
+
+function NotFound({ user }) {
+  return <main className="dashboard not-found-page">
+    <p className="kicker">PAGE NOT FOUND</p>
+    <h1>This page is off the map.</h1>
+    <p>The address may have changed, or the page may no longer be available.</p>
+    <Link className="button primary" to={user ? (user.role === 'admin' ? '/admin' : '/dashboard') : '/'}>Return to TideMarket</Link>
+  </main>;
+}
+
 function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   const [form, setForm] = useState({});
   const [error, setError] = useState('');

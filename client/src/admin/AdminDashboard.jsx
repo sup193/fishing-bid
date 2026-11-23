@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Activity, Anchor, ArrowLeft, ArrowRight, BadgeCheck, ClipboardList, CircleDollarSign, Fish, Gavel, RefreshCw, Search, Store, Trash2, UserPlus, Users } from 'lucide-react';
+import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import BidMonitoring from '../BidMonitoring.jsx';
 import TransactionHistory from '../TransactionHistory.jsx';
@@ -7,8 +8,10 @@ import AdminTrustPricing from './AdminTrustPricing.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
 import AuctionAnalytics from '../AuctionAnalytics.jsx';
 
-export default function AdminDashboard() {
-  const [view, setView] = useState('fishermen');
+export default function AdminDashboard({ initialView = 'fishermen' }) {
+  const { id: fishermanId } = useParams();
+  const navigate = useNavigate();
+  const view = initialView;
   const [data, setData] = useState(null);
   const [users, setUsers] = useState([]);
   const [listings, setListings] = useState([]);
@@ -21,6 +24,19 @@ export default function AdminDashboard() {
   const [listingSearch, setListingSearch] = useState('');
   const [removingListing, setRemovingListing] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    if (!fishermanId) {
+      setSelected(null);
+      return undefined;
+    }
+    let active = true;
+    setSelected(null);
+    setError('');
+    api.adminFisherman(fishermanId)
+      .then(detail => { if (active) setSelected(detail); })
+      .catch(err => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [fishermanId]);
 
   const load = () => Promise.all([api.adminOverview(), api.adminUsers(), api.registrationRequests(), api.adminListings()])
     .then(([overview, people, pending, marketplaceListings]) => { setData(overview); setUsers(people); setRequests(pending); setListings(marketplaceListings); })
@@ -29,7 +45,6 @@ export default function AdminDashboard() {
   const fishermen = users.filter(person => person.role === 'fisherman');
   const filteredFishermen = fishermen.filter(person => `${person.name} ${person.email} ${person.location || ''}`.toLowerCase().includes(search.toLowerCase()));
   const review = async (id, action) => { try { const result = action === 'accept' ? await api.acceptRegistration(id) : await api.rejectRegistration(id); setMessage(result.message || `Request ${action}ed.`); load(); } catch (err) { setError(err.message); } };
-  const openFisherman = async person => { setError(''); try { setSelected(await api.adminFisherman(person.id)); } catch (err) { setError(err.message); } };
   const refreshDashboard = async () => { setRefreshing(true); setError(''); try { await load(); } finally { setRefreshing(false); } };
   const removeListing = async listing => {
     if (!window.confirm(`Remove ${listing.fishType || 'this species'} from the marketplace? Existing order and payment history will be preserved.`)) return;
@@ -50,7 +65,10 @@ export default function AdminDashboard() {
   const activeListingCount = listings.filter(listing => listing.status !== 'removed').length;
   const filteredListings = listings.filter(listing => `${listing.fishType || ''} ${listing.fisherman?.name || ''} ${listing.location || ''} ${listing.status || ''}`.toLowerCase().includes(listingSearch.toLowerCase()));
 
-  if (selected) return <FishermanDetail data={selected} onBack={() => setSelected(null)} />;
+  if (fishermanId && selected?.fisherman?.id === fishermanId) {
+    return <FishermanDetail data={selected} onBack={() => { setSelected(null); navigate('/admin/fishermen'); }} />;
+  }
+  if (fishermanId && !selected) return <main className="dashboard admin-view">{error ? <><p className="notice" role="alert">{error}</p><Link className="button secondary" to="/admin/fishermen">Back to fishermen</Link></> : <p role="status">Loading fisherman details…</p>}</main>;
   return <main className="dashboard admin-view">
     <section className="admin-hero">
       <div className="admin-hero-copy">
@@ -102,19 +120,19 @@ export default function AdminDashboard() {
     <div className="metrics admin-metrics"><Metric icon={<Users />} label="Registered users" value={counts.users ?? '—'} detail="Growing community" /><Metric icon={<Anchor />} label="Active listings" value={counts.listings ?? '—'} detail="Fresh catch on market" /><Metric icon={<Activity />} label="Total bids" value={counts.bids ?? '—'} detail="Buyer activity" /><Metric icon={<CircleDollarSign />} label="Paid volume" value={data ? `₹${(data.paidTotal || 0).toLocaleString()}` : '—'} detail="Verified payments" /></div>
     <div className="admin-navigation-heading"><div><p className="kicker">WORKSPACE</p><h2>Manage your marketplace</h2></div><span>Choose a section to get started</span></div>
     <div className="admin-tabs" role="tablist" aria-label="Admin dashboard sections">
-      <button role="tab" aria-selected={view === 'fishermen'} className={view === 'fishermen' ? 'active' : ''} onClick={() => setView('fishermen')}><Fish size={18} /> Fishermen <b>{fishermen.length}</b></button>
-      <button role="tab" aria-selected={view === 'listings'} className={view === 'listings' ? 'active' : ''} onClick={() => setView('listings')}><Store size={18} /> Marketplace listings <b>{activeListingCount}</b></button>
-      <button role="tab" aria-selected={view === 'requests'} className={view === 'requests' ? 'active' : ''} onClick={() => setView('requests')}><ClipboardList size={18} /> Buyer requests <b>{requests.length}</b></button>
-      <button role="tab" aria-selected={view === 'bids'} className={view === 'bids' ? 'active' : ''} onClick={() => setView('bids')}><Gavel size={18} /> Bid review</button>
-      <button role="tab" aria-selected={view === 'transactions'} className={view === 'transactions' ? 'active' : ''} onClick={() => setView('transactions')}><CircleDollarSign size={18} /> Transactions</button>
-      <button role="tab" aria-selected={view === 'trust'} className={view === 'trust' ? 'active' : ''} onClick={() => setView('trust')}><BadgeCheck size={18} /> Trust &amp; prices</button>
-      <button role="tab" aria-selected={view === 'demand'} className={view === 'demand' ? 'active' : ''} onClick={() => setView('demand')}><Activity size={18} /> Demand analytics</button>
-      <button role="tab" aria-selected={view === 'auctions'} className={view === 'auctions' ? 'active' : ''} onClick={() => setView('auctions')}><Gavel size={18} /> Auction analytics</button>
+      <NavLink role="tab" aria-selected={view === 'fishermen'} className={view === 'fishermen' ? 'active' : ''} to="/admin/fishermen"><Fish size={18} /> Fishermen <b>{fishermen.length}</b></NavLink>
+      <NavLink role="tab" aria-selected={view === 'listings'} className={view === 'listings' ? 'active' : ''} to="/admin/listings"><Store size={18} /> Marketplace listings <b>{activeListingCount}</b></NavLink>
+      <NavLink role="tab" aria-selected={view === 'requests'} className={view === 'requests' ? 'active' : ''} to="/admin/requests"><ClipboardList size={18} /> Buyer requests <b>{requests.length}</b></NavLink>
+      <NavLink role="tab" aria-selected={view === 'bids'} className={view === 'bids' ? 'active' : ''} to="/admin/bids"><Gavel size={18} /> Bid review</NavLink>
+      <NavLink role="tab" aria-selected={view === 'transactions'} className={view === 'transactions' ? 'active' : ''} to="/admin/transactions"><CircleDollarSign size={18} /> Transactions</NavLink>
+      <NavLink role="tab" aria-selected={view === 'trust'} className={view === 'trust' ? 'active' : ''} to="/admin/trust"><BadgeCheck size={18} /> Trust &amp; prices</NavLink>
+      <NavLink role="tab" aria-selected={view === 'demand'} className={view === 'demand' ? 'active' : ''} to="/admin/demand"><Activity size={18} /> Demand analytics</NavLink>
+      <NavLink role="tab" aria-selected={view === 'auctions'} className={view === 'auctions' ? 'active' : ''} to="/admin/auctions"><Gavel size={18} /> Auction analytics</NavLink>
     </div>
     {view === 'fishermen' ? <section className="panel admin-page admin-fishermen-page">
       <div className="panel-title"><div><p className="kicker">YOUR COASTAL NETWORK</p><h2>Fishermen</h2></div><span>{fishermen.length} accounts · Select a profile to inspect sales</span></div>
       <label className="admin-search"><Search size={17} /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search name, email or port" aria-label="Search fishermen" /></label>
-      {!!filteredFishermen.length && <div className="admin-fishermen-grid">{filteredFishermen.map(person => <button className="person-line person-button" key={person.id} onClick={() => openFisherman(person)}><div className="avatar">{person.name[0]}</div><div><strong>{person.name}</strong><small>{person.email} · {person.location || 'Location not set'}</small></div><span className="role">View details <ArrowRight size={14} /></span></button>)}</div>}
+      {!!filteredFishermen.length && <div className="admin-fishermen-grid">{filteredFishermen.map(person => <Link className="person-line person-button" key={person.id} to={`/admin/fishermen/${encodeURIComponent(person.id)}`}><div className="avatar">{person.name[0]}</div><div><strong>{person.name}</strong><small>{person.email} · {person.location || 'Location not set'}</small></div><span className="role">View details <ArrowRight size={14} /></span></Link>)}</div>}
       {!fishermen.length && <p className="empty">No fishermen created yet. Add your first coastal partner to get started.</p>}
       {!!fishermen.length && !filteredFishermen.length && <p className="empty">No fishermen match “{search}”. Try another name, email, or port.</p>}
     </section> : view === 'listings' ? <section className="panel admin-page">

@@ -9,8 +9,12 @@ import bcrypt from 'bcryptjs';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-otp-'));
 process.env.TIDEMARKET_DATABASE = 'local';
 process.env.TIDEMARKET_LOCAL_DB_PATH = path.join(tempDir, 'local-db.json');
-process.env.RESEND_API_KEY = 'test-resend-key';
-process.env.OTP_FROM_EMAIL = 'Fishing Bid <test@example.com>';
+process.env.SMTP_HOST = 'smtp.gmail.com';
+process.env.SMTP_PORT = '465';
+process.env.SMTP_SECURE = 'true';
+process.env.SMTP_USER = 'test@example.com';
+process.env.SMTP_PASS = 'test-app-password';
+process.env.EMAIL_FROM = 'Fishing Bid <test@example.com>';
 process.env.OTP_HASH_SECRET = 'test-only-otp-secret';
 process.env.JWT_SECRET = 'test-only-jwt-secret';
 

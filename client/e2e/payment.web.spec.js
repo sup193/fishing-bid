@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
-const apiBase = 'http://127.0.0.1:5173/api';
+const apiBase = 'http://127.0.0.1:5174/api';
 const paymentSecret = 'test-only-e2e-razorpay-secret';
 
 test('buyer cancellation releases a listing and a verified retry persists paid order history', async ({ page }) => {
@@ -20,17 +20,18 @@ test('buyer cancellation releases a listing and a verified retry persists paid o
     };
   });
 
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Log in' }).first().click();
+  await page.goto('/login');
   const login = page.locator('.auth-modal');
+  await expect(login).toBeVisible();
   await login.locator('input[name="email"]').fill('buyer-1@auction.test');
   await login.locator('input[name="password"]').fill('auction-test-password');
   await login.getByRole('button', { name: 'Log in' }).click();
+  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
 
   const prawns = page.locator('.market-listing-section[aria-labelledby="fresh-catch-title"] .market-product-card').filter({ hasText: 'Prawns' });
   await expect(prawns).toBeVisible();
   await prawns.getByRole('button', { name: 'Buy now' }).click();
-  const details = page.locator('.modal-backdrop .modal').filter({
+  const details = page.locator('.auction-detail-content').filter({
     has: page.getByRole('button', { name: /Buy now ·/ })
   });
   await details.getByRole('button', { name: /Buy now ·/ }).click();
