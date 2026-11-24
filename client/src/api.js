@@ -1,5 +1,5 @@
 const API = (
-  import.meta.env.VITE || '/api'
+  import.meta.env.VITE_API_URL || '/api'
 ).replace(/\/$/, '');
 
 const queryString = values => {
