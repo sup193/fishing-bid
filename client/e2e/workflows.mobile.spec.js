@@ -141,3 +141,27 @@ test('Expo fisherman handles the catch form, photo upload, and listing creation 
   await page.getByRole('button', { name: 'Log out' }).first().click();
   await expect(page).toHaveURL(/\/login$/);
 });
+
+test('Expo fisherman transaction history labels a verified UPI sale correctly', async ({ page }) => {
+  await login(page, 'fisherman@auction.test');
+  await expect(page.getByText('Your catch, your terms.')).toBeVisible();
+  await page.route(`${apiBaseUrl}/fisherman/sales`, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{
+      id: 'upi-sale',
+      orderNumber: 'TEST-UPI-ORDER',
+      amount: 15000,
+      quantity: 30,
+      gateway: 'upi',
+      paymentMethod: 'upi_qr',
+      paymentStatus: 'paid',
+      transactionRef: 'upi-transaction-reference',
+      orderStatus: 'processing',
+      listingDetails: { fishType: 'Prawns', quantity: 30 }
+    }])
+  }));
+  await page.getByText('Sales', { exact: true }).click();
+  await expect(page.getByText('Selling data')).toBeVisible();
+  await expect(page.getByText(/Paid via UPI QR/)).toBeVisible();
+});

@@ -72,6 +72,7 @@ export default function TransactionHistory({ title = 'Transaction history', admi
       {pendingPayments.map(payment => <article className="upi-review-line" key={payment.id}>
         <div className="upi-review-details">
           <strong>Order {payment.orderNumber} · {payment.fishType}</strong>
+          <span>Transaction ID: {payment.id}</span>
           <span>Buyer: {payment.buyer?.name || 'Unknown buyer'}{payment.buyer?.email ? ` · ${payment.buyer.email}` : ''}</span>
           <span>Fisherman: {payment.fisherman?.name || 'Unknown fisherman'}</span>
           <span>Amount: ₹{Number(payment.amount).toFixed(2)} · UPI ID: {payment.upiRecipientId}</span>
@@ -96,6 +97,7 @@ export default function TransactionHistory({ title = 'Transaction history', admi
       return <article className="transaction-line" key={transaction.id}>
         <div className="transaction-details">
           <strong>{transaction.fishType} · Order {transaction.orderNumber || transaction.order}</strong>
+          <small>Transaction ID: {transaction.id}</small>
           <small>{paymentMethodLabel(transaction)}{transaction.upiUtr ? ` · UTR ${transaction.upiUtr}` : ''}</small>
           <small>{formattedDate(transaction.referenceSubmittedAt || transaction.paidAt || transaction.createdAt)} · {transaction.quantity} kg</small>
           {transaction.demo && <small className="practice-history-note">Practice data · no real payment processed</small>}

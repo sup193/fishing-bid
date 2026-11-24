@@ -296,7 +296,7 @@ export function FishermanInventoryScreen() {
         <Stat label="Open auctions" value={activeAuctions} />
       </View>
       <Button label="＋ Post a catch" onPress={() => { setSaleMode('sale'); setForm(blankListing); setSelectedPhoto(null); setError(''); setShowForm(true); }} />
-      {loading ? <Loading label="Loading your catches…" /> : !listings.length ? <Empty>Your inventory is empty. Post your first catch to offer it to buyers.</Empty> : listings.map(item => (
+      {loading ? <Loading label="Loading your catches…" /> : error ? null : !listings.length ? <Empty>Your inventory is empty. Post your first catch to offer it to buyers.</Empty> : listings.map(item => (
         <ListingCard
           key={item.id}
           item={item}
@@ -518,7 +518,7 @@ export function FishermanOrdersScreen() {
   return (
     <Page title="Buyer orders" subtitle="Track payments and progress for orders on your catches." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
-      {loading ? <Loading label="Loading buyer orders…" /> : !orders.length ? <Empty>Buyer orders will appear here when someone buys your catch.</Empty> : orders.map(order => {
+      {loading ? <Loading label="Loading buyer orders…" /> : error ? null : !orders.length ? <Empty>Buyer orders will appear here when someone buys your catch.</Empty> : orders.map(order => {
         const nextStatus = order.orderStatus === 'processing' ? 'delivered' : order.orderStatus === 'delivered' ? 'completed' : order.orderStatus === 'completed' ? null : 'processing';
         const canProgress = order.paymentStatus === 'paid' && !['cancelled', 'payment-failed'].includes(order.orderStatus) && nextStatus;
         return (
@@ -567,11 +567,11 @@ export function FishermanSalesScreen() {
     <Page title="Selling data" subtitle="Only verified paid orders count toward completed sales." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       <Stat label="Verified sales" value={money(total)} note={`${paidOrders.length} paid orders`} />
       {error ? <Notice>{error}</Notice> : null}
-      {loading ? <Loading label="Loading sales…" /> : !paidOrders.length ? <Empty>Verified UPI and Razorpay sales will appear here after payment review.</Empty> : paidOrders.map(order => (
+      {loading ? <Loading label="Loading sales…" /> : error ? null : !paidOrders.length ? <Empty>Verified UPI and Razorpay sales will appear here after payment review.</Empty> : paidOrders.map(order => (
         <Card key={order.id}>
           <Text style={styles.orderTitle}>{order.listingDetails?.fishType || 'Fish order'} · {money(order.amount)}</Text>
           <Text style={styles.orderMeta}>Order {order.orderNumber || order.id} · {order.quantity || 0} kg</Text>
-          <Text style={styles.orderMeta}>{order.orderStatus || 'pending'} · Paid via Razorpay</Text>
+          <Text style={styles.orderMeta}>{order.orderStatus || 'pending'} · Paid via {order.gateway === 'upi' ? 'UPI QR' : order.gateway === 'razorpay' ? 'Razorpay' : 'verified payment'}</Text>
         </Card>
       ))}
     </Page>

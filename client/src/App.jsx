@@ -138,6 +138,20 @@ export default function App() {
       <Route path="/admin/auctions" element={adminRoute('auctions')} />
       <Route path="*" element={<NotFound user={user} />} />
     </Routes>
+    <footer className="site-footer">
+      <div className="site-footer-inner">
+        <div className="site-footer-brand">
+          <Link className="brand" to="/"><span className="brand-mark"><ShipWheel size={18} /></span>Tide<span>Market</span></Link>
+          <p>Fresh catch, fair markets, stronger coastal communities.</p>
+        </div>
+        <nav aria-label="Footer navigation">
+          <Link to={user ? homeForUser : '/'}>{user ? 'Workspace' : 'Home'}</Link>
+          <Link to={user?.role === 'admin' ? '/admin/transactions' : '/auctions'}>{user?.role === 'admin' ? 'Transactions' : 'Marketplace'}</Link>
+          {user ? <Link to="/profile">Profile</Link> : <Link to="/register">Create account</Link>}
+        </nav>
+        <small>© {new Date().getFullYear()} TideMarket · Seafood commerce for coastal communities</small>
+      </div>
+    </footer>
     {authMode && <AuthModal mode={authMode} onClose={() => navigate(user ? homeForUser : '/')} onSwitch={() => openAuth(authMode === 'login' ? 'register' : 'login')} onSubmit={auth} onAuthenticated={completeAuthentication} />}
   </>;
 }

@@ -21,6 +21,22 @@ async function openAuction(page, fishType, region = 'Live Auctions') {
   return page.locator('.auction-detail-modal');
 }
 
+test('guest landing search opens the public marketplace with matching catches', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /Fresh to Your Table/i })).toBeVisible();
+  await page.getByRole('search').getByLabel('Search seafood or landing port').fill('Mackerel');
+  await page.getByRole('button', { name: 'Search catches' }).click();
+  await expect(page).toHaveURL(/\/auctions\?q=Mackerel$/);
+  const search = page.locator('.guest-market .market-search-panel');
+  await expect(search.getByRole('searchbox', { name: 'Search available seafood' })).toHaveValue('Mackerel');
+  await expect(page.locator('.guest-preview-grid .market-product-card').filter({ hasText: 'Mackerel' })).toBeVisible();
+
+  await search.getByRole('searchbox').fill('Prawns');
+  await search.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page).toHaveURL(/\/auctions\?q=Prawns$/);
+  await expect(page.locator('.guest-preview-grid .market-product-card').filter({ hasText: 'Prawns' })).toBeVisible();
+});
+
 test('buyers see live bidding, errors, proxy bidding, history and outbid notices', async ({ page, browser }) => {
   await login(page, 'buyer-1@auction.test');
   const listing = page.locator('.market-product-card').filter({ hasText: 'Mackerel' });

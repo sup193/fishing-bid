@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const widths = [320, 360, 390, 768, 1280, 1366, 1440, 1920];
+const widths = [320, 360, 375, 390, 430, 768, 1024, 1280, 1440, 1920];
 const password = 'auction-test-password';
 
 async function login(page, email) {

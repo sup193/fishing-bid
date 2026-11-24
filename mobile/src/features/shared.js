@@ -35,7 +35,7 @@ export function TransactionsScreen() {
   return (
     <Page title="Payment activity" subtitle="Transaction records and payment status for this account." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
-      {loading ? <Loading label="Loading transactions…" /> : !transactions.length ? <Empty>No payment transactions yet.</Empty> : transactions.map(item => (
+      {loading ? <Loading label="Loading transactions…" /> : error ? null : !transactions.length ? <Empty>No payment transactions yet.</Empty> : transactions.map(item => (
         <Card key={item.id}>
           <TextRow label={item.fishType || 'Fish order'} value={money(item.amount)} strong />
           <TextRow label={`Order ${item.orderNumber || item.order || item.id}`} value={paymentStatusLabel(item.status)} />
@@ -71,7 +71,7 @@ export function BidMonitoringScreen() {
   return (
     <Page title="Bid review" subtitle="Monitor auction activity and flagged bids." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
-      {loading ? <Loading label="Loading auction activity…" /> : !auctions.length ? <Empty>No auctions are available to review.</Empty> : auctions.map(auction => (
+      {loading ? <Loading label="Loading auction activity…" /> : error ? null : !auctions.length ? <Empty>No auctions are available to review.</Empty> : auctions.map(auction => (
         <Card key={auction.id}>
           <TextRow label={auction.listing?.fishType || 'Auction'} value={auction.status} strong />
           <TextRow label={`${auction.listing?.quantity || 0} kg · ${auction.listing?.location || 'Port unavailable'}`} value={`${auction.bids.length} bids`} />

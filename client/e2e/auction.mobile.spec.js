@@ -47,4 +47,5 @@ test('Expo buyer receives a visible message when auction listing API fails', asy
   await page.getByPlaceholder('Enter your password').fill('auction-test-password');
   await page.getByRole('button', { name: 'Log in' }).click();
   await expect(page.getByText('Auction service unavailable')).toBeVisible();
+  await expect(page.getByText('No catches match this view yet. Pull down to refresh.')).toHaveCount(0);
 });

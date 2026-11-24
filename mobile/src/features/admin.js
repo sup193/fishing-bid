@@ -41,7 +41,7 @@ export function AdminOverviewScreen() {
           <Text style={styles.detail}>{money(order.amount)} · {order.orderStatus || 'pending'}</Text>
           <Text style={styles.detail}>Payment {order.paymentStatus || 'pending'}</Text>
         </Card>
-      )) : !loading && <Empty>Marketplace orders will appear here.</Empty>}
+      )) : !loading && !error && <Empty>Marketplace orders will appear here.</Empty>}
     </Page>
   );
 }
@@ -100,7 +100,7 @@ export function AdminListingsScreen() {
       {error ? <Notice>{error}</Notice> : null}
       {message ? <Notice type="success">{message}</Notice> : null}
       <Field label="Search listings" value={query} onChangeText={setQuery} placeholder="Species, fisherman, port, or status" />
-      {loading ? <Loading label="Loading marketplace listings…" /> : !visibleListings.length ? <Empty>{listings.length ? 'No listings match your search.' : 'No marketplace listings yet.'}</Empty> : visibleListings.map(item => (
+      {loading ? <Loading label="Loading marketplace listings…" /> : error ? null : !visibleListings.length ? <Empty>{listings.length ? 'No listings match your search.' : 'No marketplace listings yet.'}</Empty> : visibleListings.map(item => (
         <ListingCard
           key={item.id}
           item={item}
@@ -214,7 +214,7 @@ export function AdminPeopleScreen() {
         <Button label="＋ Create" compact onPress={() => { setError(''); setShowForm(true); }} />
       </View>
       <Field label="Search fishermen" value={query} onChangeText={setQuery} placeholder="Name, email, or port" />
-      {loading ? <Loading label="Loading people…" /> : !fishermen.length ? <Empty>No fishermen match this search.</Empty> : fishermen.map(person => (
+      {loading ? <Loading label="Loading people…" /> : error ? null : !fishermen.length ? <Empty>No fishermen match this search.</Empty> : fishermen.map(person => (
         <Card key={person.id}>
           <Text style={styles.personName}>{person.name}</Text>
           <Text style={styles.detail}>{person.email} · {person.location || 'Location not set'}</Text>
@@ -222,7 +222,7 @@ export function AdminPeopleScreen() {
         </Card>
       ))}
       <SectionTitle title="Fisherman Registration Approvals" detail={`${requests.length} pending`} />
-      {!loading && !requests.length ? <Empty>No fisherman registrations awaiting approval.</Empty> : requests.map(request => (
+      {!loading && !error && !requests.length ? <Empty>No fisherman registrations awaiting approval.</Empty> : requests.map(request => (
         <Card key={request.id}>
           <Text style={styles.personName}>{request.name}</Text>
           <Text style={styles.detail}>{request.email}</Text>
@@ -333,7 +333,7 @@ export function AdminTrustScreen() {
       </Card>)}
 
       <SectionTitle title="Buyer review moderation" detail={`${reviews.filter(review => review.status === 'pending').length} pending`} />
-      {!reviews.length && !loading ? <Empty>No buyer reviews submitted.</Empty> : reviews.map(review => (
+      {!reviews.length && !loading && !error ? <Empty>No buyer reviews submitted.</Empty> : reviews.map(review => (
         <Card key={review.id}>
           <Text style={styles.personName}>{review.rating}/5 stars · {review.status}</Text>
           <Text style={styles.detail}>Verified order {review.order} · fisherman {review.fisherman}</Text>
@@ -346,7 +346,7 @@ export function AdminTrustScreen() {
       ))}
 
       <SectionTitle title="Order complaints" detail={`${disputes.filter(item => item.status !== 'reviewed').length} open`} />
-      {!disputes.length && !loading ? <Empty>No buyer complaints reported.</Empty> : disputes.map(dispute => (
+      {!disputes.length && !loading && !error ? <Empty>No buyer complaints reported.</Empty> : disputes.map(dispute => (
         <Card key={dispute.id}>
           <Text style={styles.personName}>Order {dispute.order} · {dispute.status}</Text>
           <Text style={styles.detail}>Fisherman {dispute.fisherman} · buyer identity withheld</Text>
@@ -366,10 +366,10 @@ export function AdminTrustScreen() {
         <Button label={working === 'model' ? 'Evaluating…' : 'Evaluate verified sales'} compact disabled={Boolean(working) || !analytics?.dataAvailability?.canEvaluateModel} onPress={evaluateModel} />
       </Card>
       <SectionTitle title="Species-wise verified prices" />
-      {analytics?.species?.length ? analytics.species.map(item => <Card key={item.fishType}>
+      {!error && analytics?.species?.length ? analytics.species.map(item => <Card key={item.fishType}>
         <Text style={styles.personName}>{item.fishType} · {item.observations} sales</Text>
         <Text style={styles.detail}>Average ₹{item.averagePricePerKg}/kg · range ₹{item.minimumPricePerKg}–₹{item.maximumPricePerKg}/kg</Text>
-      </Card>) : <Empty>No verified paid sales are available for market statistics.</Empty>}
+      </Card>) : !error ? <Empty>No verified paid sales are available for market statistics.</Empty> : null}
     </Page>
   );
 }

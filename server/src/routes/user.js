@@ -77,6 +77,10 @@ const PASSWORD_RESET_RATE_WINDOW_MS = 15 * 60 * 1000;
 const passwordResetRequestLimits = new Map();
 const passwordResetVerifyLimits = new Map();
 const passwordResetCompletionLimits = new Map();
+const loginAttemptLimits = new Map();
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_EMAIL_ATTEMPT_LIMIT = 10;
+const LOGIN_IP_ATTEMPT_LIMIT = 60;
 
 function normalizeOtpEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -117,6 +121,62 @@ function consumePasswordResetLimit(limits, key, maxCount) {
     if (value.resetAt <= now) limits.delete(limitKey);
   }
   return true;
+}
+
+function loginAttemptKeys(req, email) {
+  const emailHash = createHash('sha256').update(normalizeOtpEmail(email)).digest('hex');
+  return [
+    { key: `email:${emailHash}`, limit: LOGIN_EMAIL_ATTEMPT_LIMIT },
+    { key: `ip:${req.ip || 'unknown'}`, limit: LOGIN_IP_ATTEMPT_LIMIT }
+  ];
+}
+
+function pruneLoginAttemptLimits(now) {
+  for (const [key, value] of loginAttemptLimits) {
+    if (value.resetAt <= now) loginAttemptLimits.delete(key);
+  }
+  while (loginAttemptLimits.size > 10_000) {
+    loginAttemptLimits.delete(loginAttemptLimits.keys().next().value);
+  }
+}
+
+function beginLoginAttempt(req, email, res) {
+  const now = Date.now();
+  pruneLoginAttemptLimits(now);
+  const keys = loginAttemptKeys(req, email);
+  const blocked = keys
+    .map(({ key, limit }) => ({ value: loginAttemptLimits.get(key), limit }))
+    .filter(({ value, limit }) => value && value.resetAt > now && value.count >= limit);
+  if (blocked.length) {
+    const resetAt = Math.max(...blocked.map(({ value }) => value.resetAt));
+    res.set('Retry-After', String(Math.ceil((resetAt - now) / 1000)));
+    res.status(429).json({ message: 'Too many sign-in attempts. Please wait before trying again.' });
+    return false;
+  }
+  for (const { key } of keys) {
+    const current = loginAttemptLimits.get(key);
+    if (!current || current.resetAt <= now) {
+      loginAttemptLimits.set(key, { count: 1, resetAt: now + LOGIN_ATTEMPT_WINDOW_MS });
+    } else {
+      current.count += 1;
+    }
+  }
+  pruneLoginAttemptLimits(now);
+  return true;
+}
+
+function decrementLoginAttempt(key) {
+  const current = loginAttemptLimits.get(key);
+  if (!current) return;
+  if (current.count <= 1) loginAttemptLimits.delete(key);
+  else current.count -= 1;
+}
+
+function releaseLoginAttempt(req, email, { successful = false } = {}) {
+  const [emailAttempt, ipAttempt] = loginAttemptKeys(req, email);
+  if (successful) loginAttemptLimits.delete(emailAttempt.key);
+  else decrementLoginAttempt(emailAttempt.key);
+  decrementLoginAttempt(ipAttempt.key);
 }
 
 function allowPasswordResetRequest(req, email) {
@@ -787,11 +847,15 @@ router.post('/auth/reset-password', async (req, res) => {
 });
 
 router.post('/auth/login', async (req, res) => {
+  let email;
+  let attemptReserved = false;
   try {
-    const email = req.body.email?.trim().toLowerCase();
-    if (!email || typeof req.body.password !== 'string') {
+    email = normalizeOtpEmail(req.body?.email);
+    if (!email || typeof req.body?.password !== 'string') {
       return res.status(400).json({ message: 'Email and password are required' });
     }
+    if (!beginLoginAttempt(req, email, res)) return;
+    attemptReserved = true;
     const user = (await list('users')).find(item => normalizeOtpEmail(item.email) === email);
     if (!user) {
       const request = await getLatestFishermanRegistrationRequest(email);
@@ -814,6 +878,8 @@ router.post('/auth/login', async (req, res) => {
     if (!(await bcrypt.compare(req.body.password, user.passwordHash))) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
+    releaseLoginAttempt(req, email, { successful: true });
+    attemptReserved = false;
     if (user.role === 'fisherman') {
       const request = await getLatestFishermanRegistrationRequest(email);
       if (request?.status === 'pending') {
@@ -837,6 +903,7 @@ router.post('/auth/login', async (req, res) => {
     }
     return res.json({ token: signUser(user), user: publicUser(user) });
   } catch (error) {
+    if (attemptReserved) releaseLoginAttempt(req, email);
     console.error('Login failed:', error.message);
     return res.status(500).json({ message: 'Login service failed' });
   }

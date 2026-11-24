@@ -1,0 +1,89 @@
+name: Quality checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: "true"
+      NODE_ENV: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+            mobile/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --prefix server
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix client
+
+      - name: Install mobile dependencies
+        run: npm ci --prefix mobile
+
+      - name: Run backend integration tests
+        run: npm test --prefix server
+
+      - name: Check API endpoint inventory
+        run: npm run report:api --prefix server -- --check
+
+      - name: Run isolated API performance smoke
+        run: npm run test:performance --prefix server
+
+      - name: Build frontend
+        run: npm run build --prefix client
+
+      - name: Lint frontend
+        run: npm run lint --prefix client
+
+      - name: Lint Expo application
+        run: npm run lint --prefix mobile
+
+      - name: Install Playwright browser
+        working-directory: client
+        run: npx playwright install --with-deps chromium
+
+      - name: Run web and Expo-web end-to-end tests
+        run: npm run test:e2e --prefix client
+
+      - name: Upload Playwright failure traces and reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            client/test-results/
+            client/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload API endpoint inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-endpoint-inventory
+          path: server/test/api-endpoint-inventory.json
+          if-no-files-found: error
+          retention-days: 14

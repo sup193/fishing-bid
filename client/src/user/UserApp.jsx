@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
+import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Fish, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
@@ -134,6 +134,18 @@ function FishCard({ item, onSelect, onBid, isWishlisted, onToggleWishlist, now }
       </div>
     </div>
   </article>;
+}
+
+function MarketplaceSearch({ value, onChange, onSubmit }) {
+  return <form className="market-search-panel" role="search" onSubmit={onSubmit}>
+    <label className="market-search-field">
+      <Search size={19} aria-hidden="true" />
+      <span className="sr-only">Search available seafood</span>
+      <input type="search" value={value} onChange={event => onChange(event.target.value)} placeholder="Search fish, fisherman, description or port" />
+    </label>
+    <span className="market-search-hint">Results update as you type</span>
+    <button className="market-search-submit" type="submit">Search</button>
+  </form>;
 }
 
 function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, onFishTypeChange, items, now }) {
@@ -278,6 +290,7 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   const [buyerHistory, setBuyerHistory] = useState(null);
   const [buyerHistoryLoading, setBuyerHistoryLoading] = useState(false);
   const [buyerHistoryError, setBuyerHistoryError] = useState('');
+  const [marketSearch, setMarketSearch] = useState(() => searchParams.get('q') || '');
   const [recommendationCategory, setRecommendationCategory] = useState('All');
   const [recommendationBudget, setRecommendationBudget] = useState('');
   const [recommendationLocation, setRecommendationLocation] = useState('');
@@ -483,10 +496,16 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
 
   const locationOptions = [...new Set(items.map(item => item.location).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const priceHighlights = [...items].sort((a, b) => itemPrice(a) - itemPrice(b)).slice(0, 3);
+  const searchTerm = marketSearch.trim().toLowerCase();
   const visible = items.filter(item => {
     const category = categories.find(option => option.name === selectedCategory);
+    const searchableText = [item.fishType, item.location, item.fisherman?.name, item.description]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
     return (selectedCategory === 'All' || category?.matches(item))
-      && (!demandFishType || item.fishType === demandFishType);
+      && (!demandFishType || item.fishType === demandFishType)
+      && (!searchTerm || searchableText.includes(searchTerm));
   }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   const guestPreviewItems = visible.slice(0, 3);
   const activeAuctions = items.filter(item => item.saleMode === 'bid' && item.auction?.status !== 'completed' && (!item.auction?.endTime || new Date(item.auction.endTime).getTime() > now)).length;
@@ -662,6 +681,11 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
     setTransactionRefresh(value => value + 1);
     return result;
   };
+  const submitMarketplaceSearch = event => {
+    event.preventDefault();
+    const query = marketSearch.trim();
+    navigate(query ? `/auctions?q=${encodeURIComponent(query)}` : '/auctions');
+  };
 
   const bidClosed = selected?.saleMode === 'bid' && (selected?.auction?.status === 'completed' || (selected?.auction?.endTime && new Date(selected.auction.endTime).getTime() <= now));
   const buyerView = user?.role === 'buyer';
@@ -669,15 +693,6 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   const marketplaceView = currentView === 'market' || currentView === 'home';
   const routeListing = listingId ? items.find(item => item.id === listingId || item.auction?.id === listingId) : null;
   return <div className={`user-shell${buyerView ? ' buyer-dashboard' : ''}`}>
-    {!user && currentView !== 'home' && <div className="guest-login-ticker">
-      <div className="guest-login-ticker-window" role="status" aria-label="Log in to get more features and explore more products">
-        <div className="guest-login-ticker-track" aria-hidden="true">
-          <span>Log in to get more features and explore more products</span>
-          <span>Log in to get more features and explore more products</span>
-        </div>
-      </div>
-      <button className="guest-ticker-button" onClick={() => onAuth('login')}>Log in</button>
-    </div>}
     {buyerView && <>
       {currentView === 'dashboard' && <section className="buyer-overview">
         <div className="buyer-welcome">
@@ -737,6 +752,11 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
             <Link className="button guest-primary" to="/auctions">Explore auctions <ArrowUpRight size={18} /></Link>
             <button className="guest-secondary" onClick={() => setShowBiddingGuide(true)}>How bidding works</button>
           </div>
+          <form className="guest-hero-search" role="search" onSubmit={submitMarketplaceSearch}>
+            <Search size={19} aria-hidden="true" />
+            <input aria-label="Search seafood or landing port" placeholder="Search fish, seafood or port" value={marketSearch} onChange={event => setMarketSearch(event.target.value)} />
+            <button type="submit">Search catches</button>
+          </form>
           <div className="guest-trust"><span><i /> Fresh catches, listed daily</span><span><i /> Fair trade, coast to coast</span></div>
         </div>
         <div className="guest-hero-art">
@@ -745,14 +765,48 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
           <div className="guest-art-caption"><strong>Today's catch,<br />straight from the coast.</strong><span>Local fishermen · fair prices</span></div>
         </div>
       </section>}
-    {marketplaceView && !user && currentView === 'home' && <section className="guest-home-benefits">
-      <p className="kicker">FRESH, FAIR, CONNECTED</p><h2>A better way to buy from the coast.</h2>
-      <p>TideMarket brings seafood buyers and local fishermen together in one easy-to-use marketplace.</p>
-      <Link className="button guest-primary" to="/auctions">Browse the marketplace <ArrowUpRight size={18} /></Link>
-    </section>}
+    {marketplaceView && !user && currentView === 'home' && <div className="guest-home-content">
+      <section className="guest-home-section" aria-labelledby="guest-featured-title">
+        <div className="market-section-title">
+          <div><p className="kicker">FRESH FROM THE COAST</p><h2 id="guest-featured-title">Featured catches</h2></div>
+          <Link className="market-text-link" to="/auctions">Explore all catches <ArrowUpRight size={16} /></Link>
+        </div>
+        <div className="fish-grid guest-home-listings">
+          {loading ? <p className="empty">Loading today's catches…</p> : guestPreviewItems.map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+          {!loading && !guestPreviewItems.length && <p className="empty buyer-no-results">New catches will appear here as local fishermen publish listings.</p>}
+        </div>
+      </section>
+      <section className="guest-home-section guest-home-auctions" aria-labelledby="guest-auctions-title">
+        <div className="market-section-title">
+          <div><p className="kicker">LIVE BIDDING</p><h2 id="guest-auctions-title">Catch the next auction</h2></div>
+          <span>{liveAuctionItems.length} live now</span>
+        </div>
+        <div className="fish-grid guest-home-listings">
+          {liveAuctionItems.slice(0, 3).map(item => <FishCard key={item.id} item={item} onSelect={openListing} onBid={beginBid} isWishlisted={wishlist.includes(item.id)} onToggleWishlist={toggleWishlist} now={now} />)}
+          {!loading && !liveAuctionItems.length && <p className="empty buyer-no-results">There are no live auctions at the moment. Check back as fishermen list new catches.</p>}
+        </div>
+      </section>
+      <section className="guest-home-benefits" aria-labelledby="guest-benefits-title">
+        <div className="guest-benefits-heading">
+          <p className="kicker">BUILT FOR COASTAL COMMERCE</p>
+          <h2 id="guest-benefits-title">A clearer way to buy and sell seafood.</h2>
+          <p>One marketplace connecting local catch with buyers, with transparent listings and a human-reviewed payment process.</p>
+        </div>
+        <div className="guest-benefit-grid">
+          <article><span><Fish size={19} /></span><h3>For seafood buyers</h3><p>Compare available catches, follow live bids, and track orders and payment status in one place.</p></article>
+          <article><span><Waves size={19} /></span><h3>For fishermen</h3><p>Choose fixed-price selling or an auction, manage your catch, and follow verified sales.</p></article>
+          <article><span><BadgeCheck size={19} /></span><h3>Clear payment status</h3><p>UPI references stay pending until an administrator verifies receipt. A QR code or UTR is not proof of payment.</p></article>
+        </div>
+        <div className="guest-login-cta">
+          <div><p className="kicker">JOIN THE MARKETPLACE</p><h2>Start with today's catch.</h2><p>Create a buyer account to bid and purchase, or register as a fisherman to publish listings after approval.</p></div>
+          <Link className="button guest-primary" to="/register">Create an account <ArrowUpRight size={17} /></Link>
+        </div>
+      </section>
+    </div>}
     {marketplaceView && <>
       {user ? <section className="market buyer-market" id="market">
         {listingError && <p className="notice market-listing-error" role="status">Could not refresh marketplace listings: {listingError}. Showing the latest available listings.</p>}
+        <MarketplaceSearch value={marketSearch} onChange={setMarketSearch} onSubmit={submitMarketplaceSearch} />
         <section className="market-pulse-section" aria-label="Live market pulse">
           <MarketTrendChart
             data={trendData}
@@ -846,6 +900,7 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
         </section>
       </section> : currentView === 'market' ? <section className="market guest-market" id="market">
         <>
+        <MarketplaceSearch value={marketSearch} onChange={setMarketSearch} onSubmit={submitMarketplaceSearch} />
         <MarketTrendChart
           data={trendData}
           loading={trendLoading}

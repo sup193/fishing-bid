@@ -5,7 +5,6 @@ import {
   Image,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,19 +12,29 @@ import {
   View
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { resolveImageUrl } from '../../api';
 
 export const colors = {
-  ink: '#173a43',
-  sea: '#177e78',
-  coral: '#c94e39',
-  foam: '#f3f8f7',
-  muted: '#63777d',
-  line: '#dce7e5',
-  white: '#fff',
-  danger: '#b33f36',
-  pale: '#e5f2ef'
+  navy: '#102B3F',
+  teal: '#087F8C',
+  light: '#F3F7F8',
+  white: '#FFFFFF',
+  amber: '#E8A33A',
+  success: '#16865B',
+  error: '#D64545',
+  text: '#172B3A',
+  secondary: '#71808C',
+  border: '#DCE5E8',
+  ink: '#172B3A',
+  sea: '#087F8C',
+  coral: '#E8A33A',
+  foam: '#F3F7F8',
+  muted: '#71808C',
+  line: '#DCE5E8',
+  danger: '#D64545',
+  pale: '#F3F7F8'
 };
 
 export function Page({ title, subtitle, children, onRefresh, refreshing = false }) {
@@ -44,7 +53,7 @@ export function Page({ title, subtitle, children, onRefresh, refreshing = false 
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top']} style={styles.safeArea}>
       <StatusBar style="dark" />
       <View style={styles.topBar}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>TM</Text></View>
@@ -52,7 +61,7 @@ export function Page({ title, subtitle, children, onRefresh, refreshing = false 
           <Text style={styles.brandName}>TideMarket</Text>
           <Text style={styles.accountName} numberOfLines={1}>{user?.name || 'Marketplace'}</Text>
         </View>
-        <Pressable accessibilityRole="button" disabled={signingOut} onPress={logout} style={styles.logoutButton}>
+        <Pressable accessibilityRole="button" disabled={signingOut} onPress={logout} style={({ pressed }) => [styles.logoutButton, pressed && !signingOut && styles.pressed]}>
           {signingOut ? <ActivityIndicator size="small" color={colors.ink} /> : <Text style={styles.logoutText}>Log out</Text>}
         </Pressable>
       </View>
@@ -116,7 +125,7 @@ export function Chip({ label, selected, onPress }) {
       accessibilityRole="button"
       accessibilityState={{ selected: Boolean(selected) }}
       onPress={onPress}
-      style={[styles.chip, selected && styles.selectedChip]}
+      style={({ pressed }) => [styles.chip, selected && styles.selectedChip, pressed && styles.pressed]}
     >
       <Text style={[styles.chipText, selected && styles.selectedChipText]}>{label}</Text>
     </Pressable>
@@ -210,60 +219,60 @@ export function money(value) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.foam },
-  topBar: { minHeight: 66, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.white },
-  brandMark: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: colors.ink },
-  brandMarkText: { color: colors.white, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  brandCopy: { flex: 1, marginLeft: 10 },
-  brandName: { color: colors.ink, fontSize: 15, fontWeight: '800' },
-  accountName: { maxWidth: 170, marginTop: 2, color: colors.muted, fontSize: 11 },
-  logoutButton: { minHeight: 40, minWidth: 62, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  logoutText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
-  content: { width: '100%', maxWidth: 720, alignSelf: 'center', padding: 18, paddingBottom: 34, gap: 14 },
-  pageHeading: { gap: 5, marginTop: 2, marginBottom: 2 },
-  pageTitle: { color: colors.ink, fontSize: 27, fontWeight: '800', letterSpacing: -0.5 },
-  pageSubtitle: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  card: { padding: 16, borderWidth: 1, borderColor: colors.line, borderRadius: 15, backgroundColor: colors.white, gap: 10 },
-  button: { minHeight: 46, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 15, borderRadius: 10 },
-  compactButton: { minHeight: 38, paddingHorizontal: 12 },
-  primaryButton: { backgroundColor: colors.coral },
-  secondaryButton: { backgroundColor: colors.pale },
-  dangerButton: { backgroundColor: '#f8e8e6' },
-  primaryButtonText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  topBar: { minHeight: 72, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.white },
+  brandMark: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.navy },
+  brandMarkText: { color: colors.white, fontSize: 11, fontWeight: '800', letterSpacing: 0.7 },
+  brandCopy: { flex: 1, marginLeft: 12 },
+  brandName: { color: colors.navy, fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
+  accountName: { maxWidth: 190, marginTop: 3, color: colors.muted, fontSize: 11, fontWeight: '500' },
+  logoutButton: { minHeight: 44, minWidth: 70, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12 },
+  logoutText: { color: colors.sea, fontSize: 12, fontWeight: '800' },
+  content: { width: '100%', maxWidth: 720, alignSelf: 'center', padding: 20, paddingBottom: 36, gap: 16 },
+  pageHeading: { gap: 6, marginTop: 3, marginBottom: 2 },
+  pageTitle: { color: colors.navy, fontSize: 29, fontWeight: '800', letterSpacing: -0.7 },
+  pageSubtitle: { color: colors.muted, fontSize: 14, lineHeight: 21 },
+  card: { padding: 18, borderWidth: 1, borderColor: colors.line, borderRadius: 18, backgroundColor: colors.white, gap: 11 },
+  button: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 17, borderRadius: 12 },
+  compactButton: { minHeight: 42, paddingHorizontal: 14 },
+  primaryButton: { backgroundColor: colors.sea },
+  secondaryButton: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.foam },
+  dangerButton: { backgroundColor: colors.foam },
+  primaryButtonText: { color: colors.white, fontSize: 13, fontWeight: '800', letterSpacing: 0.1 },
   secondaryButtonText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
   dangerButtonText: { color: colors.danger, fontSize: 12, fontWeight: '800' },
-  pressed: { opacity: 0.8 },
+  pressed: { opacity: 0.76 },
   disabled: { opacity: 0.55 },
   field: { gap: 7 },
-  label: { color: colors.ink, fontSize: 12, fontWeight: '700' },
-  input: { minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 9, backgroundColor: colors.foam, color: colors.ink, fontSize: 14 },
-  multilineInput: { minHeight: 84, paddingVertical: 11, textAlignVertical: 'top' },
+  label: { color: colors.ink, fontSize: 12, fontWeight: '700', letterSpacing: 0.1 },
+  input: { minHeight: 50, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: colors.white, color: colors.ink, fontSize: 14 },
+  multilineInput: { minHeight: 88, paddingVertical: 12, textAlignVertical: 'top' },
   disabledInput: { opacity: 0.65 },
-  chip: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 13, borderWidth: 1, borderColor: colors.line, borderRadius: 18, backgroundColor: colors.white },
+  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 15, borderWidth: 1, borderColor: colors.line, borderRadius: 22, backgroundColor: colors.white },
   selectedChip: { borderColor: colors.sea, backgroundColor: colors.pale },
   chipText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
   selectedChipText: { color: colors.sea },
-  notice: { padding: 12, borderRadius: 10, fontSize: 13, lineHeight: 18 },
-  errorNotice: { color: colors.danger, backgroundColor: '#f8e8e6' },
-  successNotice: { color: colors.sea, backgroundColor: '#e3f2ed' },
+  notice: { padding: 13, borderRadius: 12, fontSize: 13, lineHeight: 19 },
+  errorNotice: { color: colors.danger, backgroundColor: colors.foam },
+  successNotice: { color: colors.success, backgroundColor: colors.foam },
   emptyText: { color: colors.muted, fontSize: 13, lineHeight: 19 },
   loadingCard: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   sectionTitle: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 3 },
-  sectionText: { color: colors.ink, fontSize: 16, fontWeight: '800' },
-  sectionDetail: { color: colors.muted, fontSize: 11 },
-  stat: { flex: 1, minWidth: '43%', padding: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 13, backgroundColor: colors.white, gap: 4 },
+  sectionText: { color: colors.navy, fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
+  sectionDetail: { color: colors.muted, fontSize: 11, fontWeight: '600' },
+  stat: { flex: 1, minWidth: '43%', padding: 16, borderWidth: 1, borderColor: colors.line, borderRadius: 16, backgroundColor: colors.white, gap: 5 },
   statLabel: { color: colors.muted, fontSize: 11, fontWeight: '600' },
   statValue: { color: colors.ink, fontSize: 22, fontWeight: '800' },
   statNote: { color: colors.muted, fontSize: 10 },
   listingHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  listingName: { flex: 1, color: colors.ink, fontSize: 17, fontWeight: '800' },
-  badge: { overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: colors.pale, color: colors.sea, fontSize: 9, fontWeight: '800' },
+  listingName: { flex: 1, color: colors.navy, fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
+  badge: { overflow: 'hidden', paddingHorizontal: 9, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.foam, color: colors.sea, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   listingMeta: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   listingTrust: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
   listingTrustLevel: { color: colors.sea, fontSize: 10, fontWeight: '800' },
-  listingPrice: { color: colors.coral, fontSize: 19, fontWeight: '800' },
+  listingPrice: { color: colors.navy, fontSize: 21, fontWeight: '800', letterSpacing: -0.3 },
   listingUnit: { color: colors.muted, fontSize: 11, fontWeight: '600' },
-  listingPhoto: { width: '100%', height: 170, borderRadius: 10, backgroundColor: colors.pale },
-  listingPhotoPlaceholder: { minHeight: 90, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.pale },
+  listingPhoto: { width: '100%', height: 184, borderRadius: 13, backgroundColor: colors.foam },
+  listingPhotoPlaceholder: { minHeight: 100, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: colors.foam },
   photoPlaceholderText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
   listingDetail: { color: colors.ink, fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 3 }

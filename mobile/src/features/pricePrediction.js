@@ -45,7 +45,7 @@ export function PricePredictionScreen() {
     <Page title="Fish price estimate" subtitle="Indicative price guidance, based on the transparent listing baseline and verified sales when available.">
       {error ? <Notice>{error}</Notice> : null}
       {loadingMeta ? <Loading label="Loading available species…" /> : null}
-      {!loadingMeta && !meta.fishTypes.length ? <Empty>Fish species are unavailable right now.</Empty> : null}
+      {!loadingMeta && !error && !meta.fishTypes.length ? <Empty>Fish species are unavailable right now.</Empty> : null}
       <Card>
         <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '800' }}>Fish species</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>

@@ -1,0 +1,520 @@
+{
+  "generatedFrom": [
+    "server/src/index.js",
+    "server/src/routes/user.js",
+    "server/src/routes/admin.js"
+  ],
+  "endpointCount": 85,
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/admin/auction-analytics",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/auction-chat/:id/moderation",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/auction-chat/reports",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/demand/analytics",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/demand/performance",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/disputes",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/disputes/:id/review",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/fishermen",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/fishermen/:id",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/fishermen/:id/verification",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/listings",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/listings/:id",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/overview",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/payments/:id/reject",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/payments/:id/verify",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/payments/pending",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/price-analytics",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/price-model/evaluate",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/registration-requests",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/registration-requests/:id/accept",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/registration-requests/:id/reject",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reputation",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reviews",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/reviews/:id/moderation",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "access": "admin",
+      "authorizationProbe": "anonymous-401-and-buyer-403"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auctions/:id",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auctions/:id/automatic-bidding",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auctions/:id/automatic-bidding",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auctions/:id/automatic-bidding",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auctions/:id/bids",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auctions/:id/chat",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auctions/:id/chat",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auctions/:id/chat/:messageId/report",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/auctions/:id/close",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auctions/:id/insights",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/forgot-password",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/resend-otp",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/resend-reset-otp",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/reset-password",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-otp",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-reset-otp",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bid-monitoring",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/buyer/history",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/buyer/reviews",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/demand/buyer",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/demand/fisherman",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/demand/forecast",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/demand/trending",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/fish-detection",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fisherman/listings",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fisherman/reputation",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fisherman/sales",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fishermen/:id/reputation",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/listings",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "POST",
+      "path": "/api/listings",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/listings/:id",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/listings/:id",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/listings/:id",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/listings/:id/auction",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/market/trends",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meta",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/notifications/:id/read",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/orders",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/orders/:id/delivery-schedule",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/orders/:id/disputes",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/orders/:id/reviews",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/orders/:id/status",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/razorpay/failure",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/razorpay/orders",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/razorpay/verify",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/razorpay/webhook",
+      "access": "public",
+      "authorizationProbe": "endpoint-specific"
+    },
+    {
+      "method": "GET",
+      "path": "/api/payments/upi/:transactionId/status",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/upi/orders",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/payments/upi/submit-reference",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/price-predictions",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/price-predictions",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/price-predictions/preview",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recommendations",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "GET",
+      "path": "/api/transactions",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    },
+    {
+      "method": "POST",
+      "path": "/api/uploads/image",
+      "access": "authenticated",
+      "authorizationProbe": "anonymous-401"
+    }
+  ]
+}

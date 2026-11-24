@@ -9,6 +9,10 @@ let tempDir;
 let serverHandle;
 let baseUrl;
 const tokens = new Map();
+const adminCredentials = {
+  email: 'auction-admin@auction.test',
+  password: 'auction-admin-test-password'
+};
 
 async function api(pathname, { token, method = 'GET', body } = {}) {
   const response = await fetch(`${baseUrl}/api${pathname}`, {
@@ -35,11 +39,23 @@ async function tokenFor(number = 1) {
   return tokens.get(number);
 }
 
+async function adminLogin() {
+  const login = await api('/auth/login', {
+    method: 'POST',
+    body: adminCredentials
+  });
+  assert.equal(login.response.status, 200);
+  assert.equal(login.data.user.role, 'admin');
+  return login.data;
+}
+
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-auction-api-test-'));
   process.env.TIDEMARKET_DATABASE = 'local';
   process.env.TIDEMARKET_LOCAL_DB_PATH = path.join(tempDir, 'local-db.json');
   process.env.JWT_SECRET = 'test-only-auction-jwt-secret';
+  process.env.ADMIN_EMAIL = adminCredentials.email;
+  process.env.ADMIN_PASSWORD = adminCredentials.password;
   process.env.RAZORPAY_KEY_ID = '';
   process.env.RAZORPAY_KEY_SECRET = '';
   process.env.RAZORPAY_WEBHOOK_SECRET = '';
@@ -400,14 +416,11 @@ test('auction chat validates messages, limits rate, and supports report moderati
     body: { reason: 'Please review this message' }
   });
   assert.equal(report.response.status, 201);
-  const adminLogin = await api('/auth/login', {
-    method: 'POST',
-    body: { email: 'tide@gmail.com', password: 'Tide@123' }
-  });
-  const reports = await api('/admin/auction-chat/reports', { token: adminLogin.data.token });
+  const admin = await adminLogin();
+  const reports = await api('/admin/auction-chat/reports', { token: admin.token });
   assert.ok(reports.data.some(item => item.message?.id === sent.data.id));
   const moderated = await api(`/admin/auction-chat/${sent.data.id}/moderation`, {
-    token: adminLogin.data.token,
+    token: admin.token,
     method: 'PATCH',
     body: { status: 'hidden', moderationNote: 'Test moderation' }
   });
@@ -441,50 +454,44 @@ test('auction chat validates messages, limits rate, and supports report moderati
 test('auction analytics are admin-only, filterable, and do not expose bidder IDs', async () => {
   const buyer = await tokenFor(8);
   assert.equal((await api('/admin/auction-analytics', { token: buyer })).response.status, 403);
-  const adminLogin = await api('/auth/login', {
-    method: 'POST',
-    body: { email: 'tide@gmail.com', password: 'Tide@123' }
-  });
-  const analytics = await api('/admin/auction-analytics?fishType=Tuna', { token: adminLogin.data.token });
+  const admin = await adminLogin();
+  const analytics = await api('/admin/auction-analytics?fishType=Tuna', { token: admin.token });
   assert.equal(analytics.response.status, 200);
   assert.ok(analytics.data.summary.totalAuctions > 0);
   assert.ok(analytics.data.bySpecies.every(item => item.fishType === 'Tuna'));
   assert.equal(JSON.stringify(analytics.data).includes('buyer-'), false);
-  assert.equal((await api('/admin/auction-analytics?from=bad-date', { token: adminLogin.data.token })).response.status, 400);
-  assert.equal((await api('/admin/auction-analytics?category=unlisted', { token: adminLogin.data.token })).response.status, 400);
+  assert.equal((await api('/admin/auction-analytics?from=bad-date', { token: admin.token })).response.status, 400);
+  assert.equal((await api('/admin/auction-analytics?category=unlisted', { token: admin.token })).response.status, 400);
 });
 
 test('only admins may remove a listing, and removing an active auction closes it', async () => {
   const listingId = 'listing-auction-notifications';
   const buyerToken = await tokenFor(9);
-  const adminLogin = await api('/auth/login', {
-    method: 'POST',
-    body: { email: 'tide@gmail.com', password: 'Tide@123' }
-  });
+  const admin = await adminLogin();
 
   const forbidden = await api(`/admin/listings/${listingId}`, {
     token: buyerToken,
     method: 'DELETE'
   });
   assert.equal(forbidden.response.status, 403);
-  const before = await api('/admin/listings', { token: adminLogin.data.token });
+  const before = await api('/admin/listings', { token: admin.token });
   assert.equal(before.data.find(item => item.id === listingId).status, 'auction');
 
   const removed = await api(`/admin/listings/${listingId}`, {
-    token: adminLogin.data.token,
+    token: admin.token,
     method: 'DELETE'
   });
   assert.equal(removed.response.status, 200);
   assert.equal(removed.data.listing.status, 'removed');
-  assert.equal(removed.data.listing.removedBy, adminLogin.data.user.id);
-  const after = await api('/admin/listings', { token: adminLogin.data.token });
+  assert.equal(removed.data.listing.removedBy, admin.user.id);
+  const after = await api('/admin/listings', { token: admin.token });
   const updatedListing = after.data.find(item => item.id === listingId);
   assert.equal(updatedListing.status, 'removed');
   assert.equal(updatedListing.auction.status, 'cancelled');
-  assert.equal(updatedListing.auction.cancelledBy, adminLogin.data.user.id);
+  assert.equal(updatedListing.auction.cancelledBy, admin.user.id);
   assert.equal((await api('/listings')).data.some(item => item.id === listingId), false);
   assert.equal((await api(`/admin/listings/${listingId}`, {
-    token: adminLogin.data.token,
+    token: admin.token,
     method: 'DELETE'
   })).response.status, 404);
 });

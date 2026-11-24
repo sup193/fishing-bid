@@ -17,6 +17,7 @@ export function BuyerMarketScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [marketLoadFailed, setMarketLoadFailed] = useState(false);
   const [trendDays, setTrendDays] = useState(7);
   const [trendType, setTrendType] = useState('all');
   const [trends, setTrends] = useState(null);
@@ -51,8 +52,10 @@ export function BuyerMarketScreen() {
       ]);
       setListings(market);
       setRecommendations(suggested);
+      setMarketLoadFailed(false);
     } catch (loadError) {
       setError(loadError.message);
+      setMarketLoadFailed(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -301,7 +304,7 @@ export function BuyerMarketScreen() {
         {filters.map(item => <Chip key={item} label={item} selected={filter === item} onPress={() => setFilter(item)} />)}
       </ScrollView>
       <SectionTitle title={filter === 'For you' ? 'Recommended for you' : 'Marketplace'} detail={`${filteredListings.length} catches`} />
-      {loading ? <Loading label="Loading the marketplace…" /> : !filteredListings.length ? <Empty>No catches match this view yet. Pull down to refresh.</Empty> : filteredListings.map(item => {
+      {loading ? <Loading label="Loading the marketplace…" /> : marketLoadFailed && !listings.length ? null : !filteredListings.length ? <Empty>No catches match this view yet. Pull down to refresh.</Empty> : filteredListings.map(item => {
         const closed = item.saleMode === 'bid' && (['completed', 'cancelled'].includes(item.auction?.status)
           || (item.auction?.endTime && Date.parse(item.auction.endTime) <= auctionNow));
         return (

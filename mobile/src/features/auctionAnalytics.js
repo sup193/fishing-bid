@@ -86,7 +86,7 @@ export default function AdminAuctionAnalyticsScreen() {
             <Button label="Keep visible" variant="secondary" compact onPress={() => moderate(report.message.id, 'published')} />
           </View> : null}
         </Card>
-      )) : !loading ? <Empty>No chat reports are awaiting review.</Empty> : null}
+      )) : !loading && !error ? <Empty>No chat reports are awaiting review.</Empty> : null}
       {analytics ? <Text style={styles.note}>Model {analytics.modelVersion}. Sparse historical sales produce preliminary auction estimates, not accuracy claims.</Text> : null}
     </Page>
   );

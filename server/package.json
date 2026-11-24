@@ -1,3 +1,4 @@
+
 {
   "name": "smart-fishing-api",
   "version": "1.0.0",
@@ -7,6 +8,8 @@
     "start": "node src/index.js",
     "seed:demo": "node src/seed-demo.js",
     "check:live-supabase": "node scripts/live-supabase-check.mjs",
+    "report:api": "node scripts/api-endpoint-inventory.mjs",
+    "test:performance": "node scripts/performance-smoke.mjs",
     "test": "node --test"
   },
   "dependencies": {
