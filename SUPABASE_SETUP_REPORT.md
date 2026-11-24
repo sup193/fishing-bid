@@ -102,6 +102,8 @@ The former `fetch failed` startup error was caused by an unclassified network fa
 
 The versioned migration [`202611220002_password_reset.sql`](./supabase/migrations/202611220002_password_reset.sql) adds dedicated password-reset OTP and single-use authorization tables plus user token-versioning. It does not update or delete existing users, password hashes, registration requests, or registration OTP rows. Apply it in the Supabase SQL Editor after `202611220001_pending_registrations.sql`; it has **not been applied to the hosted project in this task**.
 
+The registration workflow migration [`202611240001_fisherman_registration_approval.sql`](./supabase/migrations/202611240001_fisherman_registration_approval.sql) corrects buyer activation and fisherman approval, and queues existing unverified fisherman accounts without deleting their user records. It must be applied after the schema, pending-registration, and password-reset migrations. It was **not applied to the hosted project in this task**.
+
 Final clean restart result:
 
 - Supabase connection/schema check: **Passed**

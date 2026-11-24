@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
@@ -7,6 +7,7 @@ import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import BuyerHistory from './BuyerHistory.jsx';
 import PricePredictionTool, { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
+import useDialogAccessibility from '../useDialogAccessibility.js';
 
 const fallback = [
   { id: 'demo-1', fishType: 'Tuna', quality: 'Premium', quantity: 100, location: 'Mangalore', expectedPrice: 380, salePrice: 380, saleMode: 'bid', status: 'auction', imageVerification: 'verified', description: 'Fresh morning catch.', auction: { id: 'demo-auction', startPrice: 380, currentPrice: 380, priceIncreasePercent: 0 } },
@@ -242,6 +243,7 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showBiddingGuide, setShowBiddingGuide] = useState(false);
+  const biddingGuideRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
@@ -249,6 +251,7 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   const [automaticMax, setAutomaticMax] = useState('');
   const [automaticBudget, setAutomaticBudget] = useState('');
   const [automaticEnabled, setAutomaticEnabled] = useState(false);
+  const [automaticStatusAuctionId, setAutomaticStatusAuctionId] = useState(null);
   const [auctionInsights, setAuctionInsights] = useState(null);
   const [auctionInsightError, setAuctionInsightError] = useState('');
   const [auctionChat, setAuctionChat] = useState([]);
@@ -282,6 +285,12 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   const [recommendationWishlistOnly, setRecommendationWishlistOnly] = useState(false);
   const [listingError, setListingError] = useState('');
   const [demandFishType, setDemandFishType] = useState(() => searchParams.get('fishType') || '');
+  useDialogAccessibility({
+    open: showBiddingGuide,
+    dialogRef: biddingGuideRef,
+    onClose: () => setShowBiddingGuide(false),
+    focusKey: showBiddingGuide
+  });
 
   useEffect(() => {
     let active = true;
@@ -359,12 +368,14 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   }, [user?.id, user?.role]);
 
   const selectedAuctionId = selected?.saleMode === 'bid' ? selected.auction?.id : null;
+  const automaticSettingsReady = Boolean(selectedAuctionId) && automaticStatusAuctionId === selectedAuctionId;
   useEffect(() => {
     if (!selectedAuctionId) {
       setLiveAuctionError('');
       setAutomaticEnabled(false);
       setAutomaticMax('');
       setAutomaticBudget('');
+      setAutomaticStatusAuctionId(null);
       setAuctionInsights(null);
       setAuctionChat([]);
       setAuctionChatDraft('');
@@ -397,17 +408,31 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
   }, [selectedAuctionId]);
 
   useEffect(() => {
-    if (!selectedAuctionId || user?.role !== 'buyer') return undefined;
+    if (!selectedAuctionId || user?.role !== 'buyer') {
+      setAutomaticStatusAuctionId(null);
+      setAutomaticEnabled(false);
+      setAutomaticMax('');
+      setAutomaticBudget('');
+      return undefined;
+    }
     let active = true;
+    setAutomaticStatusAuctionId(null);
+    setAutomaticEnabled(false);
+    setAutomaticMax('');
+    setAutomaticBudget('');
     api.automaticBiddingStatus(selectedAuctionId)
       .then(result => {
         if (!active) return;
         setAutomaticEnabled(result.enabled);
         setAutomaticMax(result.maxAmount ? String(result.maxAmount) : '');
         setAutomaticBudget(result.totalBudget ? String(result.totalBudget) : '');
+        setAutomaticStatusAuctionId(selectedAuctionId);
       })
       .catch(error => {
-        if (active) setLiveAuctionError(error.message);
+        if (active) {
+          setLiveAuctionError(error.message);
+          setAutomaticStatusAuctionId(selectedAuctionId);
+        }
       });
     return () => { active = false; };
   }, [selectedAuctionId, user?.id, user?.role]);
@@ -939,8 +964,8 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
       }} />
     </main>}
     {showBiddingGuide && <div className="modal-backdrop bidding-guide-backdrop" onClick={() => setShowBiddingGuide(false)}>
-      <section className="modal bidding-guide-modal" role="dialog" aria-modal="true" aria-labelledby="market-bidding-title" onClick={event => event.stopPropagation()}>
-        <button className="close" aria-label="Close bidding guide" onClick={() => setShowBiddingGuide(false)}>×</button>
+      <section ref={biddingGuideRef} className="modal bidding-guide-modal" role="dialog" aria-modal="true" aria-labelledby="market-bidding-title" onClick={event => event.stopPropagation()}>
+        <button className="close" type="button" aria-label="Close bidding guide" data-dialog-autofocus="true" onClick={() => setShowBiddingGuide(false)}>×</button>
         <div className="bidding-guide-heading">
           <p className="kicker">SIMPLE, FAIR, TRANSPARENT</p>
           <h2 id="market-bidding-title">How Bidding Works</h2>
@@ -1045,14 +1070,14 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
               </div>
             </div>
             <section className="automatic-bid-panel">
-              <div className="automatic-bid-heading"><div><p className="kicker">BID ON YOUR BEHALF</p><h3>Automatic bidding</h3></div><label className="automatic-bid-toggle"><input type="checkbox" checked={automaticEnabled} onChange={toggleAutomaticBidding} disabled={automaticLoading} /><span>{automaticEnabled ? 'On' : 'Off'}</span></label></div>
+              <div className="automatic-bid-heading"><div><p className="kicker">BID ON YOUR BEHALF</p><h3>Automatic bidding</h3></div><label className="automatic-bid-toggle"><input type="checkbox" checked={automaticEnabled} onChange={toggleAutomaticBidding} disabled={automaticLoading || !automaticSettingsReady} /><span>{automaticEnabled ? 'On' : 'Off'}</span></label></div>
               <p>We raise your bid only when needed and never above your private maximum.</p>
               <label htmlFor="automatic-bid-maximum">Your maximum bid (₹ per kg)</label>
-              <input id="automatic-bid-maximum" type="number" min={selected.auction?.minimumBid || Number(selected.auction?.currentPrice || 0) + Number(selected.auction?.minimumIncrement || 1)} step="0.01" value={automaticMax} onChange={event => setAutomaticMax(event.target.value)} placeholder="Set your maximum" />
+              <input id="automatic-bid-maximum" type="number" min={selected.auction?.minimumBid || Number(selected.auction?.currentPrice || 0) + Number(selected.auction?.minimumIncrement || 1)} step="0.01" value={automaticMax} onChange={event => setAutomaticMax(event.target.value)} placeholder="Set your maximum" disabled={!automaticSettingsReady} />
               <label htmlFor="automatic-bid-budget">Optional total budget for this catch (₹)</label>
-              <input id="automatic-bid-budget" type="number" min="0.01" step="0.01" value={automaticBudget} onChange={event => setAutomaticBudget(event.target.value)} placeholder="Caps per-kg bids by quantity" />
+              <input id="automatic-bid-budget" type="number" min="0.01" step="0.01" value={automaticBudget} onChange={event => setAutomaticBudget(event.target.value)} placeholder="Caps per-kg bids by quantity" disabled={!automaticSettingsReady} />
               {automaticBudget && selected.quantity ? <small>At {Number(selected.quantity).toLocaleString()} kg, your total spend cap limits bidding to about ₹{(Number(automaticBudget) / Number(selected.quantity)).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg.</small> : null}
-              <button className="button secondary full" type="button" disabled={automaticLoading || !(automaticMax || automaticBudget)} onClick={saveAutomaticBidding}>{automaticLoading ? 'Saving…' : automaticEnabled ? 'Update maximum bid' : 'Activate automatic bidding'}</button>
+              <button className="button secondary full" type="button" disabled={automaticLoading || !automaticSettingsReady || !(automaticMax || automaticBudget)} onClick={saveAutomaticBidding}>{automaticLoading ? 'Saving…' : automaticEnabled ? 'Update maximum bid' : 'Activate automatic bidding'}</button>
               <small>Your limits are private and are never shown to other buyers. Automatic bids never exceed your per-kg maximum or total budget.</small>
             </section>
           </>}
@@ -1076,9 +1101,11 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
 }
 
 function CheckoutForm({ type, onClose, onSubmit }) {
+  const dialogRef = useRef(null);
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  useDialogAccessibility({ open: true, dialogRef, onClose, focusKey: type });
   const submit = async event => {
     event.preventDefault();
     setLoading(true);
@@ -1091,12 +1118,12 @@ function CheckoutForm({ type, onClose, onSubmit }) {
     }
   };
   return <div className="modal-backdrop" onClick={onClose}>
-    <div className="modal" onClick={event => event.stopPropagation()}>
-      <button className="close" onClick={onClose}>×</button>
+    <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title" onClick={event => event.stopPropagation()}>
+      <button className="close" type="button" aria-label="Close checkout" onClick={onClose}>×</button>
       <p className="kicker">{type === 'buyout' ? 'BUYOUT ORDER' : 'AUCTION CHECKOUT'}</p>
-      <h2>Pay securely with Razorpay.</h2>
+      <h2 id="checkout-title">Pay securely with Razorpay.</h2>
       <form onSubmit={submit}>
-        <textarea name="address" placeholder="Delivery or pickup address" value={address} onChange={event => setAddress(event.target.value)} rows="3" required />
+        <textarea name="address" aria-label="Delivery or pickup address" data-dialog-autofocus="true" placeholder="Delivery or pickup address" value={address} onChange={event => setAddress(event.target.value)} rows="3" required />
         {error && <p className="form-error">{error}</p>}
         <button className="button primary full" type="submit" disabled={loading}>{loading ? 'Preparing secure checkout…' : 'Continue to payment'}</button>
       </form>

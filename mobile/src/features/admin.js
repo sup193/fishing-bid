@@ -123,6 +123,7 @@ export function AdminPeopleScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reviewing, setReviewing] = useState('');
+  const [reviewingAction, setReviewingAction] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -146,6 +147,7 @@ export function AdminPeopleScreen() {
 
   async function reviewRequest(requestId, action) {
     setReviewing(requestId);
+    setReviewingAction(action);
     setError('');
     setMessage('');
     try {
@@ -156,6 +158,7 @@ export function AdminPeopleScreen() {
       setError(reviewError.message);
     } finally {
       setReviewing('');
+      setReviewingAction('');
     }
   }
 
@@ -203,7 +206,7 @@ export function AdminPeopleScreen() {
   }
 
   return (
-    <Page title="People & onboarding" subtitle="Review buyer requests and manage fisherman accounts." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
+    <Page title="People & onboarding" subtitle="Review fisherman registrations and manage fisherman accounts." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       {error ? <Notice>{error}</Notice> : null}
       {message ? <Notice type="success">{message}</Notice> : null}
       <View style={styles.peopleActions}>
@@ -218,15 +221,16 @@ export function AdminPeopleScreen() {
           <Button label="View performance" variant="secondary" compact onPress={() => openFisherman(person)} />
         </Card>
       ))}
-      <SectionTitle title="Buyer registration requests" detail={`${requests.length} pending`} />
-      {!loading && !requests.length ? <Empty>No buyer requests are waiting for review.</Empty> : requests.map(request => (
+      <SectionTitle title="Fisherman Registration Approvals" detail={`${requests.length} pending`} />
+      {!loading && !requests.length ? <Empty>No fisherman registrations awaiting approval.</Empty> : requests.map(request => (
         <Card key={request.id}>
           <Text style={styles.personName}>{request.name}</Text>
-          <Text style={styles.detail}>{request.email}{request.phone ? ` · ${request.phone}` : ''}</Text>
-          {request.location ? <Text style={styles.detail}>{request.location}</Text> : null}
+          <Text style={styles.detail}>{request.email}</Text>
+          {request.phone ? <Text style={styles.detail}>Phone: {request.phone}</Text> : null}
+          {request.location ? <Text style={styles.detail}>Location: {request.location}</Text> : null}
           <View style={styles.requestActions}>
-            <Button label="Accept" compact onPress={() => reviewRequest(request.id, 'accept')} loading={reviewing === request.id} />
-            <Button label="Reject" variant="danger" compact onPress={() => reviewRequest(request.id, 'reject')} loading={reviewing === request.id} />
+            <Button label={reviewing === request.id && reviewingAction === 'accept' ? 'Approving…' : 'Approve'} compact onPress={() => reviewRequest(request.id, 'accept')} disabled={reviewing === request.id} loading={reviewing === request.id && reviewingAction === 'accept'} />
+            <Button label={reviewing === request.id && reviewingAction === 'reject' ? 'Rejecting…' : 'Reject'} variant="danger" compact onPress={() => reviewRequest(request.id, 'reject')} disabled={reviewing === request.id} loading={reviewing === request.id && reviewingAction === 'reject'} />
           </View>
         </Card>
       ))}

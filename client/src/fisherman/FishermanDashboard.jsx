@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, ClipboardList, Clock3, Fish, Gavel, ImagePlus, MessageCircle, PackageCheck, Plus, ShoppingBag, Trash2, XCircle } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { api } from '../api.js';
@@ -8,6 +8,7 @@ import { sampleImageFor, sampleImageForFishType } from '../fishImages.js';
 import ReputationPanel from '../ReputationPanel.jsx';
 import { PricePredictionSummary } from '../PricePredictionTool.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
+import useDialogAccessibility from '../useDialogAccessibility.js';
 
 const emptyForm = { fishType: '', quantity: '', quality: 'Premium', size: 'Medium', freshness: 'fresh', location: '', expectedPrice: '', salePrice: '', description: '', imageUrl: '', storagePath: '', saleMode: 'sale', minimumIncrement: 10, endTime: '' };
 
@@ -111,7 +112,7 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
   };
   const progressOrder = async (order, status) => { setError(''); try { await api.updateOrderStatus(order.id, status); setMessage(`Order marked ${status}.`); loadSales(); api.fishermanReputation().then(setReputation).catch(err => setError(err.message)); } catch (err) { setError(err.message); } };
   const scheduleDelivery = async (order, date) => { const expectedDeliveryAt = Date.parse(`${date}T23:59:59`); if (!Number.isFinite(expectedDeliveryAt)) { setError('Choose an expected delivery date.'); return; } setError(''); try { await api.setDeliverySchedule(order.id, new Date(expectedDeliveryAt).toISOString()); setMessage('Expected delivery date saved.'); loadSales(); } catch (err) { setError(err.message); } };
-  const startPost = () => { setForm(emptyForm); setMode(null); onViewChange?.('inventory'); };
+  const startPost = () => onViewChange?.('create-listing');
   return <main className="dashboard fisherman-view">
     <section className="fisherman-hero">
       <div className="fisherman-hero-copy">
@@ -130,7 +131,7 @@ export default function FishermanDashboard({ initialView = 'inventory', onViewCh
       <article><span className="fisherman-overview-icon"><Clock3 size={18} /></span><small>Orders to review</small><strong>{pendingOrders}</strong><span>Buyer orders not completed</span></article>
       <article><span className="fisherman-overview-icon"><Activity size={18} /></span><small>Verified sales</small><strong>₹{verifiedSales.toLocaleString()}</strong><span>Confirmed Razorpay payments</span></article>
     </section>
-    <nav className="fisherman-tabs" aria-label="Fisherman dashboard">
+    <nav className="fisherman-tabs" aria-label="Fisherman dashboard sections">
       <NavLink to="/my-auctions" className={view === 'inventory' ? 'active' : ''}><Fish size={17} /> Inventory <b>{listings.length}</b></NavLink>
       <NavLink to="/orders" className={view === 'orders' ? 'active' : ''} onClick={loadSales}><ClipboardList size={17} /> Buyer orders <b>{sales.length}</b></NavLink>
       <NavLink to="/sales" className={view === 'sales' ? 'active' : ''} onClick={loadSales}><ShoppingBag size={17} /> Selling data <b>{sales.filter(order => order.paymentStatus === 'paid' || ['processing', 'completed', 'delivered'].includes(order.orderStatus)).length}</b></NavLink>
@@ -307,15 +308,17 @@ function CatchRow({ item, onClose, onDelete, onEdit, onChat }) {
       {canClose && <button className="button small dark" onClick={() => onClose(auction.id)}>Stop bidding</button>}
       {auction && onChat && <button className="button small secondary" onClick={() => onChat({ id: auction.id, fishType: item.fishType, status: auction.status, endTime: auction.endTime, messages: [] })}><MessageCircle size={14} /> Chat</button>}
       {item.saleMode !== 'bid' && item.status === 'available' && <button className="button small secondary" onClick={() => onEdit(item)}>Edit listing</button>}
-      {canDelete && <button className="icon-button danger" title="Delete listing" onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}
+      {canDelete && <button className="icon-button danger" title="Delete listing" aria-label={`Delete ${item.fishType} listing`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button>}
     </div>
   </article>;
 }
 
 function FishermanAuctionChat({ auction, onClose, onUpdated }) {
+  const dialogRef = useRef(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState('');
+  useDialogAccessibility({ open: true, dialogRef, onClose, focusKey: auction.id });
   const submit = async event => {
     event.preventDefault();
     if (!draft.trim()) return;
@@ -332,9 +335,9 @@ function FishermanAuctionChat({ auction, onClose, onUpdated }) {
     }
   };
   return <div className="modal-backdrop" onClick={onClose}>
-    <section className="modal auction-chat-modal" aria-label={`${auction.fishType} auction chat`} onClick={event => event.stopPropagation()}>
-      <button className="close" type="button" onClick={onClose}>×</button>
-      <p className="kicker">BUYER CONVERSATION</p><h2>{auction.fishType} auction chat</h2>
+    <section ref={dialogRef} className="modal auction-chat-modal" role="dialog" aria-modal="true" aria-labelledby="fisherman-chat-title" onClick={event => event.stopPropagation()}>
+      <button className="close" type="button" aria-label="Close auction chat" onClick={onClose}>×</button>
+      <p className="kicker">BUYER CONVERSATION</p><h2 id="fisherman-chat-title">{auction.fishType} auction chat</h2>
       <p>Answer buyer questions about the catch. Contact details are blocked to keep communication on-platform.</p>
       {chatError && <p className="notice" role="alert">{chatError}</p>}
       <div className="auction-chat-messages">
@@ -342,7 +345,7 @@ function FishermanAuctionChat({ auction, onClose, onUpdated }) {
         {!auction.messages?.length && <p className="empty">No buyer questions yet.</p>}
       </div>
       {!['completed', 'cancelled'].includes(auction.status) && <form className="auction-chat-form" onSubmit={submit}>
-        <input aria-label="Reply to auction chat" value={draft} maxLength={500} onChange={event => setDraft(event.target.value)} placeholder="Reply to buyers…" />
+        <input aria-label="Reply to auction chat" data-dialog-autofocus="true" value={draft} maxLength={500} onChange={event => setDraft(event.target.value)} placeholder="Reply to buyers…" />
         <button className="button primary" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send'}</button>
       </form>}
       <small>Chat refreshes automatically while open. Messages are visible to signed-in buyers viewing this auction.</small>

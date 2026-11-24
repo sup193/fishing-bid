@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, Anchor, ArrowLeft, ArrowRight, BadgeCheck, ClipboardList, CircleDollarSign, Fish, Gavel, RefreshCw, Search, Store, Trash2, UserPlus, Users } from 'lucide-react';
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
@@ -7,6 +7,7 @@ import TransactionHistory from '../TransactionHistory.jsx';
 import AdminTrustPricing from './AdminTrustPricing.jsx';
 import DemandForecastPanel from '../DemandForecastPanel.jsx';
 import AuctionAnalytics from '../AuctionAnalytics.jsx';
+import useDialogAccessibility from '../useDialogAccessibility.js';
 
 export default function AdminDashboard({ initialView = 'fishermen' }) {
   const { id: fishermanId } = useParams();
@@ -23,6 +24,8 @@ export default function AdminDashboard({ initialView = 'fishermen' }) {
   const [search, setSearch] = useState('');
   const [listingSearch, setListingSearch] = useState('');
   const [removingListing, setRemovingListing] = useState('');
+  const [reviewingRequest, setReviewingRequest] = useState('');
+  const [reviewingAction, setReviewingAction] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
     if (!fishermanId) {
@@ -44,7 +47,22 @@ export default function AdminDashboard({ initialView = 'fishermen' }) {
   useEffect(() => { load(); }, []);
   const fishermen = users.filter(person => person.role === 'fisherman');
   const filteredFishermen = fishermen.filter(person => `${person.name} ${person.email} ${person.location || ''}`.toLowerCase().includes(search.toLowerCase()));
-  const review = async (id, action) => { try { const result = action === 'accept' ? await api.acceptRegistration(id) : await api.rejectRegistration(id); setMessage(result.message || `Request ${action}ed.`); load(); } catch (err) { setError(err.message); } };
+  const review = async (id, action) => {
+    setError('');
+    setMessage('');
+    setReviewingRequest(id);
+    setReviewingAction(action);
+    try {
+      const result = action === 'approve' ? await api.acceptRegistration(id) : await api.rejectRegistration(id);
+      setMessage(result.message || `Fisherman registration ${action}d.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReviewingRequest('');
+      setReviewingAction('');
+    }
+  };
   const refreshDashboard = async () => { setRefreshing(true); setError(''); try { await load(); } finally { setRefreshing(false); } };
   const removeListing = async listing => {
     if (!window.confirm(`Remove ${listing.fishType || 'this species'} from the marketplace? Existing order and payment history will be preserved.`)) return;
@@ -115,20 +133,20 @@ export default function AdminDashboard({ initialView = 'fishermen' }) {
         </svg>
       </div>
     </section>
-    {message && <p className="success-notice">{message}</p>}{error && <p className="notice">{error}</p>}
+    {message && <p className="success-notice" role="status">{message}</p>}{error && <p className="notice" role="alert">{error}</p>}
     <div className="admin-section-heading"><div><p className="kicker">LIVE MARKET PULSE</p><h2>Stronger communities start at the water’s edge.</h2></div><span><span className="pulse" /> Live overview</span></div>
     <div className="metrics admin-metrics"><Metric icon={<Users />} label="Registered users" value={counts.users ?? '—'} detail="Growing community" /><Metric icon={<Anchor />} label="Active listings" value={counts.listings ?? '—'} detail="Fresh catch on market" /><Metric icon={<Activity />} label="Total bids" value={counts.bids ?? '—'} detail="Buyer activity" /><Metric icon={<CircleDollarSign />} label="Paid volume" value={data ? `₹${(data.paidTotal || 0).toLocaleString()}` : '—'} detail="Verified payments" /></div>
     <div className="admin-navigation-heading"><div><p className="kicker">WORKSPACE</p><h2>Manage your marketplace</h2></div><span>Choose a section to get started</span></div>
-    <div className="admin-tabs" role="tablist" aria-label="Admin dashboard sections">
-      <NavLink role="tab" aria-selected={view === 'fishermen'} className={view === 'fishermen' ? 'active' : ''} to="/admin/fishermen"><Fish size={18} /> Fishermen <b>{fishermen.length}</b></NavLink>
-      <NavLink role="tab" aria-selected={view === 'listings'} className={view === 'listings' ? 'active' : ''} to="/admin/listings"><Store size={18} /> Marketplace listings <b>{activeListingCount}</b></NavLink>
-      <NavLink role="tab" aria-selected={view === 'requests'} className={view === 'requests' ? 'active' : ''} to="/admin/requests"><ClipboardList size={18} /> Buyer requests <b>{requests.length}</b></NavLink>
-      <NavLink role="tab" aria-selected={view === 'bids'} className={view === 'bids' ? 'active' : ''} to="/admin/bids"><Gavel size={18} /> Bid review</NavLink>
-      <NavLink role="tab" aria-selected={view === 'transactions'} className={view === 'transactions' ? 'active' : ''} to="/admin/transactions"><CircleDollarSign size={18} /> Transactions</NavLink>
-      <NavLink role="tab" aria-selected={view === 'trust'} className={view === 'trust' ? 'active' : ''} to="/admin/trust"><BadgeCheck size={18} /> Trust &amp; prices</NavLink>
-      <NavLink role="tab" aria-selected={view === 'demand'} className={view === 'demand' ? 'active' : ''} to="/admin/demand"><Activity size={18} /> Demand analytics</NavLink>
-      <NavLink role="tab" aria-selected={view === 'auctions'} className={view === 'auctions' ? 'active' : ''} to="/admin/auctions"><Gavel size={18} /> Auction analytics</NavLink>
-    </div>
+    <nav className="admin-tabs" aria-label="Admin dashboard sections">
+      <NavLink aria-current={view === 'fishermen' ? 'page' : undefined} className={view === 'fishermen' ? 'active' : ''} to="/admin/fishermen"><Fish size={18} /> Fishermen <b>{fishermen.length}</b></NavLink>
+      <NavLink aria-current={view === 'listings' ? 'page' : undefined} className={view === 'listings' ? 'active' : ''} to="/admin/listings"><Store size={18} /> Marketplace listings <b>{activeListingCount}</b></NavLink>
+      <NavLink aria-current={view === 'requests' ? 'page' : undefined} className={view === 'requests' ? 'active' : ''} to="/admin/requests"><ClipboardList size={18} /> Fisherman approvals <b>{requests.length}</b></NavLink>
+      <NavLink aria-current={view === 'bids' ? 'page' : undefined} className={view === 'bids' ? 'active' : ''} to="/admin/bids"><Gavel size={18} /> Bid review</NavLink>
+      <NavLink aria-current={view === 'transactions' ? 'page' : undefined} className={view === 'transactions' ? 'active' : ''} to="/admin/transactions"><CircleDollarSign size={18} /> Transactions</NavLink>
+      <NavLink aria-current={view === 'trust' ? 'page' : undefined} className={view === 'trust' ? 'active' : ''} to="/admin/trust"><BadgeCheck size={18} /> Trust &amp; prices</NavLink>
+      <NavLink aria-current={view === 'demand' ? 'page' : undefined} className={view === 'demand' ? 'active' : ''} to="/admin/demand"><Activity size={18} /> Demand analytics</NavLink>
+      <NavLink aria-current={view === 'auctions' ? 'page' : undefined} className={view === 'auctions' ? 'active' : ''} to="/admin/auctions"><Gavel size={18} /> Auction analytics</NavLink>
+    </nav>
     {view === 'fishermen' ? <section className="panel admin-page admin-fishermen-page">
       <div className="panel-title"><div><p className="kicker">YOUR COASTAL NETWORK</p><h2>Fishermen</h2></div><span>{fishermen.length} accounts · Select a profile to inspect sales</span></div>
       <label className="admin-search"><Search size={17} /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search name, email or port" aria-label="Search fishermen" /></label>
@@ -149,9 +167,24 @@ export default function AdminDashboard({ initialView = 'fishermen' }) {
       </div>
       {!filteredListings.length && <p className="empty">{listings.length ? 'No listings match that search.' : 'No species listings have been uploaded yet.'}</p>}
     </section> : view === 'requests' ? <section className="panel admin-page">
-      <div className="panel-title"><div><p className="kicker">COMMUNITY ONBOARDING</p><h2>Buyer registration requests</h2></div><span>{requests.length} pending review</span></div>
-      {requests.map(request => <div className="request-line" key={request.id}><div><strong>{request.name}</strong><small>{request.email}{request.phone ? ` · ${request.phone}` : ''}</small></div><div className="request-actions"><button className="button small primary" onClick={() => review(request.id, 'accept')}>Accept</button><button className="button small secondary" onClick={() => review(request.id, 'reject')}>Reject</button></div></div>)}
-      {!requests.length && <p className="empty">You’re all caught up. New buyer requests will appear here.</p>}
+      <div className="panel-title"><div><p className="kicker">COMMUNITY ONBOARDING</p><h2>Fisherman Registration Approvals</h2></div><span>{requests.length} pending review</span></div>
+      {requests.map(request => <div className="request-line" key={request.id}>
+        <div>
+          <strong>{request.name}</strong>
+          <small>{request.email}</small>
+          {request.phone && <small>Phone: {request.phone}</small>}
+          {request.location && <small>Location: {request.location}</small>}
+        </div>
+        <div className="request-actions">
+          <button className="button small primary" onClick={() => review(request.id, 'approve')} disabled={reviewingRequest === request.id}>
+            {reviewingRequest === request.id && reviewingAction === 'approve' ? 'Approving…' : 'Approve'}
+          </button>
+          <button className="button small secondary" onClick={() => review(request.id, 'reject')} disabled={reviewingRequest === request.id}>
+            {reviewingRequest === request.id && reviewingAction === 'reject' ? 'Rejecting…' : 'Reject'}
+          </button>
+        </div>
+      </div>)}
+      {!requests.length && <p className="empty">No fisherman registrations awaiting approval.</p>}
     </section> : view === 'bids' ? <BidMonitoring title="Marketplace bid history & review" /> : view === 'transactions' ? <TransactionHistory title="All payment transactions" /> : view === 'demand' ? <DemandForecastPanel role="admin" /> : view === 'auctions' ? <AuctionAnalytics /> : <AdminTrustPricing />}
     {showForm && <FishermanForm onClose={() => setShowForm(false)} onCreated={name => { setShowForm(false); setMessage(`${name} can now sign in as a fisherman.`); load(); }} />}
   </main>;
@@ -187,4 +220,30 @@ function FishermanDetail({ data, onBack }) {
   </main>;
 }
 function Metric({ icon, label, value, detail }) { return <div className="metric"><span className="metric-icon">{icon}</span><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>; }
-function FishermanForm({ onClose, onCreated }) { const [form, setForm] = useState({}); const [error, setError] = useState(''); const change = event => setForm({ ...form, [event.target.name]: event.target.value }); const submit = event => { event.preventDefault(); api.createFisherman(form).then(result => onCreated(result.name)).catch(err => setError(err.message)); }; return <div className="modal-backdrop"><div className="modal"><button className="close" onClick={onClose}>×</button><p className="kicker">ADMIN ACCOUNT CONTROL</p><h2>Create fisherman login.</h2><form onSubmit={submit} autoComplete="on"><input name="name" placeholder="Fisherman name" autoComplete="name" onChange={change} required /><input name="email" type="email" placeholder="Login email" autoComplete="username" onChange={change} required /><input name="password" type="password" placeholder="Temporary password" autoComplete="new-password" onChange={change} required /><input name="location" placeholder="Port or location" onChange={change} /><input name="phone" placeholder="Phone number" autoComplete="tel" onChange={change} />{error && <p className="form-error">{error}</p>}<button className="button primary full" type="submit">Create fisherman account</button></form></div></div>; }
+function FishermanForm({ onClose, onCreated }) {
+  const dialogRef = useRef(null);
+  const [form, setForm] = useState({});
+  const [error, setError] = useState('');
+  useDialogAccessibility({ open: true, dialogRef, onClose, focusKey: 'create-fisherman' });
+  const change = event => setForm({ ...form, [event.target.name]: event.target.value });
+  const submit = event => {
+    event.preventDefault();
+    api.createFisherman(form).then(result => onCreated(result.name)).catch(err => setError(err.message));
+  };
+  return <div className="modal-backdrop" onClick={onClose}>
+    <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="create-fisherman-title" onClick={event => event.stopPropagation()}>
+      <button className="close" type="button" aria-label="Close create fisherman form" onClick={onClose}>×</button>
+      <p className="kicker">ADMIN ACCOUNT CONTROL</p>
+      <h2 id="create-fisherman-title">Create fisherman login.</h2>
+      <form onSubmit={submit} autoComplete="on">
+        <input name="name" aria-label="Fisherman name" data-dialog-autofocus="true" placeholder="Fisherman name" autoComplete="name" onChange={change} required />
+        <input name="email" aria-label="Login email" type="email" placeholder="Login email" autoComplete="username" onChange={change} required />
+        <input name="password" aria-label="Temporary password" type="password" placeholder="Temporary password" autoComplete="new-password" onChange={change} required />
+        <input name="location" aria-label="Port or location" placeholder="Port or location" onChange={change} />
+        <input name="phone" aria-label="Phone number" placeholder="Phone number" autoComplete="tel" onChange={change} />
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="button primary full" type="submit">Create fisherman account</button>
+      </form>
+    </div>
+  </div>;
+}

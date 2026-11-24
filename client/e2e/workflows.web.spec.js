@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { e2eApiUrl } from './urls.js';
 
 const password = 'auction-test-password';
 const pixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l3sAAAAASUVORK5CYII=', 'base64');
@@ -37,7 +38,7 @@ test('buyer navigation uses dedicated routes and browser history', async ({ page
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: /Welcome back,/ })).toBeVisible();
 
-  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
+  await page.locator('.buyer-dashboard-nav').getByRole('link', { name: 'Auctions' }).click();
   await expect(page).toHaveURL(/\/auctions$/);
   await page.locator('.market-product-card .market-details-button').first().click();
   await expect(page).toHaveURL(/\/auctions\/[^/]+$/);
@@ -53,7 +54,7 @@ test('buyer navigation uses dedicated routes and browser history', async ({ page
   await page.goForward();
   await expect(page).toHaveURL(/\/bids$/);
 
-  await page.locator('.topbar nav').getByRole('link', { name: 'Notifications' }).click();
+  await page.locator('.buyer-dashboard-nav').getByRole('link', { name: 'Notifications' }).click();
   await expect(page).toHaveURL(/\/notifications$/);
   await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible();
   await page.getByRole('button', { name: 'Open buyer profile for Test Buyer 1' }).click();
@@ -99,12 +100,12 @@ test('role-specific routes restore on refresh and redirect unauthorized users', 
 
 test('forgot password verifies a separate OTP, resets the password, and returns to login', async ({ page }) => {
   const email = `reset-${Date.now()}@audit.test`;
-  const adminLogin = await page.context().request.post('http://127.0.0.1:5174/api/auth/login', {
+  const adminLogin = await page.context().request.post(`${e2eApiUrl}/auth/login`, {
     data: { email: 'admin@auction.test', password }
   });
   expect(adminLogin.status()).toBe(200);
   const adminToken = (await adminLogin.json()).token;
-  const created = await page.context().request.post('http://127.0.0.1:5174/api/admin/fishermen', {
+  const created = await page.context().request.post(`${e2eApiUrl}/admin/fishermen`, {
     headers: { Authorization: `Bearer ${adminToken}` },
     data: { name: 'Reset Test Seller', email, password: 'OriginalResetPassword123' }
   });
@@ -139,7 +140,7 @@ test('forgot password verifies a separate OTP, resets the password, and returns 
   await expect(page.getByRole('button', { name: 'Open fisherman profile for Reset Test Seller' })).toBeVisible();
 });
 
-test('buyer registration, admin approval, admin account creation and role restrictions work end-to-end', async ({ page }) => {
+test('buyers activate after OTP while fisherman registrations require admin approval', async ({ page }) => {
   const email = `buyer-${Date.now()}@audit.test`;
   await page.goto('/');
   await page.getByRole('button', { name: 'Sign up' }).click();
@@ -152,13 +153,16 @@ test('buyer registration, admin approval, admin account creation and role restri
   await signup.getByRole('button', { name: 'Create account' }).click();
   await signup.locator('input[name="otp"]').fill('123456');
   await signup.getByRole('button', { name: 'Verify email' }).click();
-  await expect(page.locator('.auth-modal').getByRole('heading', { name: 'Welcome back to the water.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome back, Audit Buyer.' })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tide_user') || '{}').role)).toBe('buyer');
+  await logout(page, 'buyer');
+
   await login(page, 'admin@auction.test');
   await expect(page.getByRole('heading', { name: 'Welcome, Admin.' })).toBeVisible();
   const tabNames = [
     'Fishermen',
     'Marketplace listings',
-    'Buyer requests',
+    'Fisherman approvals',
     'Bid review',
     'Transactions',
     'Trust & prices',
@@ -166,32 +170,99 @@ test('buyer registration, admin approval, admin account creation and role restri
     'Auction analytics'
   ];
   for (const name of tabNames) {
-    const tab = page.getByRole('tab', { name: new RegExp(name, 'i') });
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    const section = page.getByRole('navigation', { name: 'Admin dashboard sections' }).getByRole('link', { name: new RegExp(name, 'i') });
+    await section.click();
+    await expect(section).toHaveAttribute('aria-current', 'page');
   }
 
-  await page.getByRole('tab', { name: /Buyer requests/i }).click();
-  const request = page.locator('.request-line').filter({ hasText: email });
-  await expect(request).toBeVisible();
-  await request.getByRole('button', { name: 'Accept' }).click();
-  await expect(request).toHaveCount(0);
+  const approvalsLink = page.getByRole('navigation', { name: 'Admin dashboard sections' }).getByRole('link', { name: /Fisherman approvals/i });
+  await approvalsLink.click();
+  await expect(page.getByRole('heading', { name: 'Fisherman Registration Approvals' })).toBeVisible();
+  await expect(page.locator('.request-line').filter({ hasText: email })).toHaveCount(0);
+  await logout(page, 'admin');
 
   const fishermanEmail = `fisherman-${Date.now()}@audit.test`;
+  await page.goto('/register');
+  const fishermanSignup = page.locator('.auth-modal');
+  await fishermanSignup.locator('input[name="name"]').fill('Audit Fisherman');
+  await fishermanSignup.locator('input[name="phone"]').fill('9999999998');
+  await fishermanSignup.locator('select[name="role"]').selectOption('fisherman');
+  await fishermanSignup.locator('input[name="email"]').fill(fishermanEmail);
+  await fishermanSignup.locator('input[name="password"]').fill('audit-fisherman-password');
+  await fishermanSignup.getByRole('button', { name: 'Create account' }).click();
+  await fishermanSignup.locator('input[name="otp"]').fill('654321');
+  await fishermanSignup.getByRole('button', { name: 'Verify email' }).click();
+  await expect(fishermanSignup.getByText('Your email has been verified successfully. Your fisherman registration is awaiting admin approval. You will be able to log in once your account is approved.')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('tide_token'))).toBeNull();
+  await fishermanSignup.getByRole('button', { name: 'Go to login' }).click();
+  const pendingLogin = page.locator('.auth-modal');
+  await pendingLogin.locator('input[name="email"]').fill(fishermanEmail);
+  await pendingLogin.locator('input[name="password"]').fill('audit-fisherman-password');
+  await pendingLogin.getByRole('button', { name: 'Log in' }).click();
+  await expect(pendingLogin.getByText('Your fisherman registration is awaiting admin approval.')).toBeVisible();
+
+  await page.goto('/');
+  await login(page, 'admin@auction.test');
+  await approvalsLink.click();
+  const request = page.locator('.request-line').filter({ hasText: fishermanEmail });
+  await expect(request).toBeVisible();
+  await expect(request.getByText('9999999998')).toBeVisible();
+  await request.getByRole('button', { name: 'Approve' }).click();
+  await expect(request).toHaveCount(0);
+  await expect(page.getByText('Fisherman account approved')).toBeVisible();
+  const fishermanLogin = await page.context().request.post(`${e2eApiUrl}/auth/login`, {
+    data: { email: fishermanEmail, password: 'audit-fisherman-password' }
+  });
+  expect(fishermanLogin.status()).toBe(200);
+  expect((await fishermanLogin.json()).user.role).toBe('fisherman');
+  await logout(page, 'admin');
+  await login(page, fishermanEmail, 'audit-fisherman-password');
+  await expect(page.getByRole('heading', { name: 'Your catch,' })).toBeVisible();
+  await logout(page, 'fisherman');
+  await login(page, 'admin@auction.test');
+
   await page.getByRole('button', { name: 'Create fisherman account' }).first().click();
   const createFisherman = page.locator('.modal').filter({ has: page.getByRole('heading', { name: 'Create fisherman login.' }) });
+  const createdFishermanEmail = `admin-created-${Date.now()}@audit.test`;
   await createFisherman.locator('input[name="name"]').fill('Audit Fisherman');
-  await createFisherman.locator('input[name="email"]').fill(fishermanEmail);
+  await createFisherman.locator('input[name="email"]').fill(createdFishermanEmail);
   await createFisherman.locator('input[name="password"]').fill('audit-fisherman-password');
   await createFisherman.locator('input[name="location"]').fill('Test Port');
   await createFisherman.getByRole('button', { name: 'Create fisherman account' }).click();
   await expect(page.getByText('Audit Fisherman can now sign in as a fisherman.')).toBeVisible();
 
-  const fishermanLogin = await page.context().request.post('http://127.0.0.1:5174/api/auth/login', {
-    data: { email: fishermanEmail, password: 'audit-fisherman-password' }
+  const createdFishermanLogin = await page.context().request.post(`${e2eApiUrl}/auth/login`, {
+    data: { email: createdFishermanEmail, password: 'audit-fisherman-password' }
   });
-  expect(fishermanLogin.status()).toBe(200);
-  expect((await fishermanLogin.json()).user.role).toBe('fisherman');
+  expect(createdFishermanLogin.status()).toBe(200);
+  expect((await createdFishermanLogin.json()).user.role).toBe('fisherman');
+
+  const rejectedEmail = `rejected-fisherman-${Date.now()}@audit.test`;
+  const rejectedRegistration = await page.context().request.post(`${e2eApiUrl}/auth/register`, {
+    data: {
+      name: 'Rejected Audit Fisherman',
+      email: rejectedEmail,
+      password: 'rejected-fisherman-password',
+      role: 'fisherman'
+    }
+  });
+  expect(rejectedRegistration.status()).toBe(202);
+  const rejectedVerification = await page.context().request.post(`${e2eApiUrl}/auth/verify-otp`, {
+    data: { email: rejectedEmail, otp: '654321' }
+  });
+  expect(rejectedVerification.status()).toBe(202);
+  expect((await rejectedVerification.json()).status).toBe('pending_admin');
+  await page.getByRole('button', { name: 'Refresh data dashboard' }).click();
+  await approvalsLink.click();
+  const rejectedRequest = page.locator('.request-line').filter({ hasText: rejectedEmail });
+  await expect(rejectedRequest).toBeVisible();
+  await rejectedRequest.getByRole('button', { name: 'Reject' }).click();
+  await expect(rejectedRequest).toHaveCount(0);
+  const rejectedLogin = await page.context().request.post(`${e2eApiUrl}/auth/login`, {
+    data: { email: rejectedEmail, password: 'rejected-fisherman-password' }
+  });
+  expect(rejectedLogin.status()).toBe(403);
+  expect((await rejectedLogin.json()).status).toBe('rejected');
 
   await logout(page, 'admin');
   await login(page, email, 'audit-buyer-password');
@@ -204,7 +275,7 @@ test('buyer registration, admin approval, admin account creation and role restri
   await login(page, email, 'audit-buyer-password');
   await expect(page.getByRole('heading', { name: 'Welcome back, Audit Buyer.' })).toBeVisible();
   const buyerToken = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const adminOnly = await page.context().request.get('http://127.0.0.1:5174/api/admin/overview', {
+  const adminOnly = await page.context().request.get(`${e2eApiUrl}/admin/overview`, {
     headers: { Authorization: `Bearer ${buyerToken}` }
   });
   expect(adminOnly.status()).toBe(403);
@@ -215,7 +286,6 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
   await login(page, 'fisherman@auction.test');
   await expect(page.getByRole('heading', { name: 'Your catch,' })).toBeVisible();
   await page.getByRole('button', { name: 'Post a catch' }).click();
-  await page.getByRole('button', { name: /Fixed price/i }).click();
 
   const form = page.locator('.listing-form');
   await form.getByLabel('Fish species').selectOption({ label: 'Mackerel' });
@@ -234,7 +304,7 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
   await expect(page.getByText('Sale listing created.')).toBeVisible();
 
   const token = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const readListings = async () => page.context().request.get('http://127.0.0.1:5174/api/fisherman/listings', {
+  const readListings = async () => page.context().request.get(`${e2eApiUrl}/fisherman/listings`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   const initialResponse = await readListings();
@@ -261,7 +331,7 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
 
   await logout(page, 'fisherman');
   await login(page, 'buyer-1@auction.test');
-  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
+  await page.locator('.buyer-dashboard-nav').getByRole('link', { name: 'Auctions' }).click();
   await page.locator('.seafood-category-card').filter({ has: page.getByText('Fish', { exact: true }) }).click();
   const buyerCard = page.locator('.market-listing-section[aria-labelledby="fresh-catch-title"] .market-product-card').filter({ hasText: location });
   await expect(buyerCard).toBeVisible();
@@ -287,14 +357,14 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
   await expect(page.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible();
 
   const buyerToken = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const blockedRemoval = await page.context().request.delete(`http://127.0.0.1:5174/api/admin/listings/${created.id}`, {
+  const blockedRemoval = await page.context().request.delete(`${e2eApiUrl}/admin/listings/${created.id}`, {
     headers: { Authorization: `Bearer ${buyerToken}` }
   });
   expect(blockedRemoval.status()).toBe(403);
 
   await logout(page, 'buyer');
   await login(page, 'admin@auction.test');
-  await page.getByRole('tab', { name: /Marketplace listings/i }).click();
+  await page.getByRole('navigation', { name: 'Admin dashboard sections' }).getByRole('link', { name: /Marketplace listings/i }).click();
   await page.getByLabel('Search marketplace listings').fill(location);
   const adminListing = page.locator('.admin-market-listing').filter({ hasText: location });
   await expect(adminListing).toBeVisible();
@@ -302,12 +372,12 @@ test('fisherman uploads, creates and edits a listing that the buyer can find and
   await adminListing.getByRole('button', { name: 'Remove Mackerel from marketplace' }).click();
   await expect(page.getByText('Mackerel removed from the marketplace')).toBeVisible();
   const adminToken = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const adminListings = await page.context().request.get('http://127.0.0.1:5174/api/admin/listings', {
+  const adminListings = await page.context().request.get(`${e2eApiUrl}/admin/listings`, {
     headers: { Authorization: `Bearer ${adminToken}` }
   });
   expect(adminListings.status()).toBe(200);
   expect((await adminListings.json()).find(listing => listing.id === created.id).status).toBe('removed');
-  const publicListings = await page.context().request.get('http://127.0.0.1:5174/api/listings');
+  const publicListings = await page.context().request.get(`${e2eApiUrl}/listings`);
   expect((await publicListings.json()).some(listing => listing.id === created.id)).toBe(false);
 });
 
@@ -316,7 +386,7 @@ test('only admins can moderate marketplace reviews and approved changes persist'
   await login(page, 'buyer-1@auction.test');
   await expect(page.getByRole('button', { name: 'Open buyer profile' })).toBeVisible();
   const buyerToken = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const denied = await page.context().request.patch(`http://127.0.0.1:5174/api/admin/reviews/${reviewId}/moderation`, {
+  const denied = await page.context().request.patch(`${e2eApiUrl}/admin/reviews/${reviewId}/moderation`, {
     headers: { Authorization: `Bearer ${buyerToken}` },
     data: { status: 'approved' }
   });
@@ -324,14 +394,14 @@ test('only admins can moderate marketplace reviews and approved changes persist'
 
   await logout(page, 'buyer');
   await login(page, 'admin@auction.test');
-  await page.getByRole('tab', { name: /Trust & prices/i }).click();
+  await page.getByRole('navigation', { name: 'Admin dashboard sections' }).getByRole('link', { name: /Trust & prices/i }).click();
   const review = page.locator('.admin-review-row').filter({ hasText: 'E2E moderation fixture' });
   await expect(review).toBeVisible();
   await review.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(review.getByText(/approved/i)).toBeVisible();
 
   const adminToken = await page.evaluate(() => localStorage.getItem('tide_token'));
-  const reviews = await page.context().request.get('http://127.0.0.1:5174/api/admin/reviews', {
+  const reviews = await page.context().request.get(`${e2eApiUrl}/admin/reviews`, {
     headers: { Authorization: `Bearer ${adminToken}` }
   });
   expect(reviews.status()).toBe(200);

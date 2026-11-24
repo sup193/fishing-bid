@@ -1,6 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  e2eApiPort,
+  e2eHost,
+  e2eMobileApiPort,
+  e2eMobileWebPort,
+  e2eMobileWebUrl,
+  e2eWebPort,
+  e2eWebUrl
+} from './e2e/urls.js';
 
 const clientDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(clientDir, '..');
@@ -21,49 +30,49 @@ export default defineConfig({
     {
       name: 'desktop-web',
       testMatch: '**/*.web.spec.js',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://127.0.0.1:5174' }
+      use: { ...devices['Desktop Chrome'], baseURL: e2eWebUrl }
     },
     {
       name: 'mobile-expo-web',
       testMatch: '**/*.mobile.spec.js',
-      use: { ...devices['Pixel 7'], baseURL: 'http://localhost:8081' }
+      use: { ...devices['Pixel 7'], baseURL: e2eMobileWebUrl }
     }
   ],
   webServer: [
     {
       command: 'node server/test-support/startAuctionApi.js',
       cwd: projectRoot,
-      url: 'http://127.0.0.1:5010/api/health',
+      url: `http://${e2eHost}:${e2eApiPort}/api/health`,
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { PORT: '5010' }
+      env: { PORT: String(e2eApiPort) }
     },
     {
       command: 'node server/test-support/startAuctionApi.js',
       cwd: projectRoot,
-      url: 'http://127.0.0.1:5001/api/health',
+      url: `http://${e2eHost}:${e2eMobileApiPort}/api/health`,
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { PORT: '5001' }
+      env: { PORT: String(e2eMobileApiPort) }
     },
     {
-      command: 'npm run dev -- --host 127.0.0.1 --port 5174',
+      command: `npm run dev -- --host ${e2eHost} --port ${e2eWebPort}`,
       cwd: clientDir,
-      url: 'http://127.0.0.1:5174',
+      url: e2eWebUrl,
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { VITE_API_PROXY_TARGET: 'http://127.0.0.1:5010' }
+      env: { VITE_API_PROXY_TARGET: `http://${e2eHost}:${e2eApiPort}` }
     },
     {
-      command: 'npm run web -- --port 8081 --host localhost',
+      command: `npm run web -- --port ${e2eMobileWebPort} --host localhost`,
       cwd: mobileDir,
-      url: 'http://localhost:8081',
+      url: e2eMobileWebUrl,
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
         CI: '1',
         NODE_OPTIONS: '--max-old-space-size=4096',
-        EXPO_PUBLIC_API_URL: 'http://127.0.0.1:5001/api'
+        EXPO_PUBLIC_API_URL: `http://${e2eHost}:${e2eMobileApiPort}/api`
       }
     }
   ]

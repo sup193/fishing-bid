@@ -31,6 +31,15 @@ const server = await new Promise((resolve, reject) => {
   listener.once('error', reject);
 });
 const baseUrl = `http://127.0.0.1:${server.address().port}/api`;
+const database = await import('../src/db.js');
+const adminId = 'otp-test-admin';
+await database.insert('users', {
+  name: 'OTP Test Admin',
+  email: 'otp-admin@example.test',
+  passwordHash: await bcrypt.hash('OtpAdminPassword123', 4),
+  role: 'admin'
+}, adminId);
+const adminToken = jwt.sign({ id: adminId, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
 after(async () => {
   emailService.setEmailSenderForTests(null);
@@ -38,11 +47,14 @@ after(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-async function request(route, body) {
+async function request(route, body, { method = 'POST', token } = {}) {
   const response = await fetch(`${baseUrl}${route}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
+    method,
+    headers: {
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {})
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   });
   return { status: response.status, body: await response.json() };
 }
@@ -52,7 +64,7 @@ function latestOtp() {
   return email.html.match(/<p style="[^"]*">(\d{6})<\/p>/)?.[1];
 }
 
-test('buyer OTP registration creates a pending admin request after verification', async () => {
+test('buyer OTP verification activates the account and returns an authenticated buyer session', async () => {
   const email = `otp-buyer-${Date.now()}@example.com`;
   const registration = await request('/auth/register', {
     name: 'Shivakumar Rao',
@@ -66,15 +78,32 @@ test('buyer OTP registration creates a pending admin request after verification'
   const pending = await database.getPendingRegistration(email);
   const otp = latestOtp();
   const verification = await request('/auth/verify-otp', { email, otp });
-  assert.equal(verification.status, 202);
-  assert.equal(verification.body.status, 'pending');
-  const registrationRequest = (await database.list('registrationRequests')).find(item => item.email === email);
-  assert.equal(registrationRequest.name, 'Shivakumar Rao');
-  assert.equal(registrationRequest.passwordHash, pending.passwordHash);
-  assert.equal(await bcrypt.compare('BuyerPassword123', registrationRequest.passwordHash), true);
+  assert.equal(verification.status, 201);
+  assert.equal(verification.body.user.role, 'buyer');
+  assert.equal(verification.body.user.email, email);
+  assert.ok(verification.body.token);
+  const user = await database.get('users', verification.body.user.id);
+  assert.equal(user.verificationStatus, 'verified');
+  assert.equal(user.passwordHash, pending.passwordHash);
+  assert.equal(await bcrypt.compare('BuyerPassword123', user.passwordHash), true);
+  assert.equal((await database.list('registrationRequests')).some(item => item.email === email), false);
+
+  const session = await request('/auth/me', undefined, { method: 'GET', token: verification.body.token });
+  assert.equal(session.status, 200);
+  assert.equal(session.body.user.role, 'buyer');
+  const buyerApi = await request('/buyer/history', undefined, { method: 'GET', token: verification.body.token });
+  assert.equal(buyerApi.status, 200);
+  const approvals = await request('/admin/registration-requests', undefined, { method: 'GET', token: adminToken });
+  assert.equal(approvals.status, 200);
+  assert.equal(approvals.body.some(item => item.email === email), false);
+  const forbiddenApproval = await request('/admin/registration-requests', undefined, {
+    method: 'GET',
+    token: verification.body.token
+  });
+  assert.equal(forbiddenApproval.status, 403);
 });
 
-test('seller OTP registration creates a bcrypt-backed fisherman JWT', async () => {
+test('fisherman OTP registration waits for admin approval before account activation', async () => {
   const email = `otp-fisher-${Date.now()}@example.com`;
   const registration = await request('/auth/register', {
     name: 'Shivakumar Rao',
@@ -88,17 +117,130 @@ test('seller OTP registration creates a bcrypt-backed fisherman JWT', async () =
   const pending = await database.getPendingRegistration(email);
   const otp = latestOtp();
   const verification = await request('/auth/verify-otp', { email, otp });
-  assert.equal(verification.status, 201);
-  assert.equal(verification.body.user.role, 'fisherman');
-  assert.equal(verification.body.user.name, 'Shivakumar Rao');
-  assert.notEqual(verification.body.user.name, otp);
-  assert.ok(verification.body.token);
-  const user = await database.get('users', verification.body.user.id);
+  assert.equal(verification.status, 202);
+  assert.equal(verification.body.status, 'pending_admin');
+  assert.equal(verification.body.role, 'fisherman');
+  assert.equal(verification.body.message, 'Your email has been verified successfully. Your fisherman registration is awaiting admin approval. You will be able to log in once your account is approved.');
+  assert.equal(verification.body.token, undefined);
+  assert.equal((await database.list('users')).some(item => item.email === email), false);
+  const registrationRequest = (await database.list('registrationRequests')).find(item => item.email === email);
+  assert.equal(registrationRequest.role, 'fisherman');
+  assert.equal(registrationRequest.status, 'pending');
+  assert.equal(registrationRequest.name, 'Shivakumar Rao');
+  assert.equal(registrationRequest.passwordHash, pending.passwordHash);
+  assert.equal(await bcrypt.compare('FisherPassword123', registrationRequest.passwordHash), true);
+
+  const pendingLogin = await request('/auth/login', { email, password: 'FisherPassword123' });
+  assert.equal(pendingLogin.status, 403);
+  assert.equal(pendingLogin.body.status, 'pending');
+  const pendingApi = await request('/fisherman/listings', undefined, { method: 'GET' });
+  assert.equal(pendingApi.status, 401);
+
+  const approvals = await request('/admin/registration-requests', undefined, { method: 'GET', token: adminToken });
+  assert.ok(approvals.body.some(item => item.id === registrationRequest.id && item.role === 'fisherman'));
+  assert.equal(approvals.body.some(item => item.passwordHash), false);
+  const nonAdminId = `otp-non-admin-${Date.now()}`;
+  await database.insert('users', {
+    name: 'OTP Test Buyer',
+    email: `${nonAdminId}@example.test`,
+    passwordHash: await bcrypt.hash('OtpBuyerPassword123', 4),
+    role: 'buyer'
+  }, nonAdminId);
+  const nonAdminToken = jwt.sign({ id: nonAdminId, role: 'buyer' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  const forbiddenApproval = await request(`/admin/registration-requests/${registrationRequest.id}/accept`, undefined, {
+    method: 'PATCH',
+    token: nonAdminToken
+  });
+  assert.equal(forbiddenApproval.status, 403);
+  const forbiddenRejection = await request(`/admin/registration-requests/${registrationRequest.id}/reject`, undefined, {
+    method: 'PATCH',
+    token: nonAdminToken
+  });
+  assert.equal(forbiddenRejection.status, 403);
+  const approved = await request(`/admin/registration-requests/${registrationRequest.id}/accept`, undefined, {
+    method: 'PATCH',
+    token: adminToken
+  });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.user.role, 'fisherman');
+  assert.equal(approved.body.user.verificationStatus, 'verified');
+  const user = await database.get('users', approved.body.user.id);
   assert.equal(user.passwordHash, pending.passwordHash);
-  assert.equal(await bcrypt.compare('FisherPassword123', user.passwordHash), true);
+
+  const login = await request('/auth/login', { email, password: 'FisherPassword123' });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.user.role, 'fisherman');
+  const fishermanApi = await request('/fisherman/listings', undefined, { method: 'GET', token: login.body.token });
+  assert.equal(fishermanApi.status, 200);
+  const duplicateApproval = await request(`/admin/registration-requests/${registrationRequest.id}/accept`, undefined, {
+    method: 'PATCH',
+    token: adminToken
+  });
+  assert.equal(duplicateApproval.status, 404);
 
   const reused = await request('/auth/verify-otp', { email, otp });
   assert.equal(reused.status, 404);
+});
+
+test('rejected fishermen cannot use old sessions and can resubmit for approval', async () => {
+  const email = `otp-fisher-resubmit-${Date.now()}@example.com`;
+  const password = 'ResubmitFisherPassword123';
+  await request('/auth/register', {
+    name: 'Resubmitting Fisherman',
+    email,
+    phone: `91${Date.now().toString().slice(-8)}`,
+    password,
+    role: 'fisherman'
+  });
+  const verification = await request('/auth/verify-otp', { email, otp: latestOtp() });
+  assert.equal(verification.status, 202);
+  const registration = (await database.list('registrationRequests')).find(item => item.email === email);
+  const legacyUserId = `legacy-fisher-${Date.now()}`;
+  await database.insert('users', {
+    name: 'Resubmitting Fisherman',
+    email,
+    passwordHash: await bcrypt.hash(password, 4),
+    role: 'fisherman',
+    verificationStatus: 'unverified'
+  }, legacyUserId);
+  const oldToken = jwt.sign({ id: legacyUserId, role: 'fisherman' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+  const blockedSession = await request('/fisherman/listings', undefined, { method: 'GET', token: oldToken });
+  assert.equal(blockedSession.status, 403);
+  const rejected = await request(`/admin/registration-requests/${registration.id}/reject`, undefined, {
+    method: 'PATCH',
+    token: adminToken
+  });
+  assert.equal(rejected.status, 200);
+  const rejectedLogin = await request('/auth/login', { email, password });
+  assert.equal(rejectedLogin.status, 403);
+  assert.equal(rejectedLogin.body.status, 'rejected');
+  const rejectedSession = await request('/fisherman/listings', undefined, { method: 'GET', token: oldToken });
+  assert.equal(rejectedSession.status, 403);
+
+  const resubmission = await request('/auth/register', {
+    name: 'Resubmitting Fisherman',
+    email,
+    phone: (await database.get('users', legacyUserId)).phone,
+    password,
+    role: 'fisherman'
+  });
+  assert.equal(resubmission.status, 202);
+  const resubmittedVerification = await request('/auth/verify-otp', { email, otp: latestOtp() });
+  assert.equal(resubmittedVerification.status, 202);
+  const pendingRequest = (await database.list('registrationRequests'))
+    .filter(item => item.email === email && item.status === 'pending')
+    .at(-1);
+  assert.ok(pendingRequest);
+  const approved = await request(`/admin/registration-requests/${pendingRequest.id}/accept`, undefined, {
+    method: 'PATCH',
+    token: adminToken
+  });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.user.id, legacyUserId);
+  const login = await request('/auth/login', { email, password });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.user.role, 'fisherman');
 });
 
 test('incorrect and expired OTP responses are enforced', async () => {
@@ -174,13 +316,13 @@ test('duplicate email and phone are rejected', async () => {
   assert.equal(duplicatePhone.status, 409);
 });
 
-test('valid JWT restores session and expired JWT is rejected', async () => {
+test('buyer JWT restores session and expired JWT is rejected', async () => {
   const email = `otp-session-${Date.now()}@example.com`;
   await request('/auth/register', {
-    name: 'Session Seller',
+    name: 'Session Buyer',
     email,
     password: 'SessionPassword123',
-    role: 'fisherman'
+    role: 'buyer'
   });
   const otp = latestOtp();
   const verification = await request('/auth/verify-otp', { email, otp });

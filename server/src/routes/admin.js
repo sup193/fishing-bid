@@ -1,6 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import { get, insert, list, update, transact, where, sortNewest, sanitizeUser } from '../db.js';
+import { get, insert, list, update, transact, where, sortNewest, sanitizeUser, makeId, reviewFishermanRegistration } from '../db.js';
 import { allow, requireAuth } from '../auth.js';
 import { getFishermanReputation, listFishermanReputations, refreshFishermanReputation } from '../reputation.js';
 import { evaluatePriceModels, MIN_VERIFIED_SALES_FOR_MODEL, verifiedSaleObservations } from '../pricePrediction.js';
@@ -8,9 +8,32 @@ import { buildDemandInsights, DEMAND_CATEGORIES, evaluateDemandForecast, fishCat
 import { buildAuctionAnalytics } from '../auctionInsights.js';
 const router = express.Router();
 router.use(requireAuth, allow('admin'));
-router.get('/registration-requests', async (req, res) => res.json(sortNewest((await list('registrationRequests')).filter(item => item.status === 'pending').map(item => ({ ...item, passwordHash: undefined })) )));
-router.patch('/registration-requests/:id/accept', async (req, res) => { const request = await get('registrationRequests', req.params.id); if (!request || request.status !== 'pending') return res.status(404).json({ message: 'Pending request not found' }); if ((await list('users')).some(user => user.email === request.email)) return res.status(409).json({ message: 'Email is already registered' }); const userData = { name: request.name, email: request.email, passwordHash: request.passwordHash, role: 'buyer' }; if (request.phone) userData.phone = request.phone; if (request.location) userData.location = request.location; const user = await insert('users', userData); await update('registrationRequests', request.id, { status: 'accepted', reviewedAt: new Date().toISOString(), reviewedBy: req.user.id }); res.json({ message: 'Buyer account approved', user: sanitizeUser(user) }); });
-router.patch('/registration-requests/:id/reject', async (req, res) => { const request = await get('registrationRequests', req.params.id); if (!request || request.status !== 'pending') return res.status(404).json({ message: 'Pending request not found' }); res.json(await update('registrationRequests', request.id, { status: 'rejected', reviewedAt: new Date().toISOString(), reviewedBy: req.user.id })); });
+router.get('/registration-requests', async (req, res) => res.json(sortNewest(
+  (await list('registrationRequests'))
+    .filter(item => item.role === 'fisherman' && item.status === 'pending')
+    .map(({ passwordHash, ...item }) => item)
+)));
+router.patch('/registration-requests/:id/accept', async (req, res) => {
+  const result = await reviewFishermanRegistration({
+    requestId: req.params.id,
+    action: 'approve',
+    adminId: req.user.id,
+    userId: makeId('user')
+  });
+  if (result.status === 'not_found') return res.status(404).json({ message: 'Pending fisherman registration not found' });
+  if (result.status === 'duplicate') return res.status(409).json({ message: 'Email or phone number is already registered' });
+  return res.json({ message: 'Fisherman account approved', user: sanitizeUser(result.user) });
+});
+router.patch('/registration-requests/:id/reject', async (req, res) => {
+  const result = await reviewFishermanRegistration({
+    requestId: req.params.id,
+    action: 'reject',
+    adminId: req.user.id,
+    userId: makeId('user')
+  });
+  if (result.status === 'not_found') return res.status(404).json({ message: 'Pending fisherman registration not found' });
+  return res.json({ status: result.status, message: 'Fisherman registration rejected' });
+});
 router.post('/fishermen', async (req, res) => {
   try {
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
@@ -22,7 +45,13 @@ router.post('/fishermen', async (req, res) => {
     }
     const existing = (await list('users')).find(user => user.email === email);
     if (existing) return res.status(400).json({ message: 'Email is already registered' });
-    const fishermanData = { name, email, passwordHash: await bcrypt.hash(password, 12), role: 'fisherman' };
+    const fishermanData = {
+      name,
+      email,
+      passwordHash: await bcrypt.hash(password, 12),
+      role: 'fisherman',
+      verificationStatus: 'verified'
+    };
     const phone = typeof req.body.phone === 'string' ? req.body.phone.trim().slice(0, 30) : '';
     const location = typeof req.body.location === 'string' ? req.body.location.trim().slice(0, 120) : '';
     if (phone) fishermanData.phone = phone;

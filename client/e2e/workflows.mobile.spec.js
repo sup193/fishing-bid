@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { e2eMobileApiUrl } from './urls.js';
 
 const password = 'auction-test-password';
-const apiBaseUrl = 'http://127.0.0.1:5001/api';
+const apiBaseUrl = e2eMobileApiUrl;
 const pixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l3sAAAAASUVORK5CYII=', 'base64');
 
 async function login(page, email) {

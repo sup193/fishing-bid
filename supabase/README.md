@@ -5,8 +5,9 @@ On a new project, run the migrations in order in the Supabase SQL Editor:
 1. [`migrations/202611210001_tidemarket_schema.sql`](./migrations/202611210001_tidemarket_schema.sql)
 2. [`migrations/202611220001_pending_registrations.sql`](./migrations/202611220001_pending_registrations.sql)
 3. [`migrations/202611220002_password_reset.sql`](./migrations/202611220002_password_reset.sql)
+4. [`migrations/202611240001_fisherman_registration_approval.sql`](./migrations/202611240001_fisherman_registration_approval.sql)
 
-For an existing Fishing Bid project that already has the first two migrations, apply only the password-reset migration. It adds reset-only tables and `users.tokenVersion`; it preserves all user records, password hashes, registration requests, and registration OTP records.
+For an existing Fishing Bid project with the first three migrations already applied, apply only `202611240001_fisherman_registration_approval.sql`. It replaces the OTP-consumption and fisherman-review functions, changes approval indexes to cover fishermen only, and queues existing unverified fisherman accounts for review without deleting user records.
 
 The migration creates:
 

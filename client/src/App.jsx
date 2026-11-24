@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, ClipboardList, Eye, EyeOff, Fish, Gavel, LogIn, LogOut, Mail, MapPin, Menu, ReceiptText, ShipWheel, ShoppingBag, Store, UserRound, Users, X } from 'lucide-react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api } from './api.js';
+import useDialogAccessibility from './useDialogAccessibility.js';
 import UserApp from './user/UserApp.jsx';
 import AdminDashboard from './admin/AdminDashboard.jsx';
 import FishermanDashboard from './fisherman/FishermanDashboard.jsx';
@@ -13,6 +14,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(() => Boolean(localStorage.getItem('tide_token')));
   const [menu, setMenu] = useState(false);
+  const menuButtonRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -21,6 +23,17 @@ export default function App() {
     else if (location.pathname === '/register') setAuthMode('register');
     else setAuthMode(null);
   }, [location.pathname]);
+  useEffect(() => setMenu(false), [location.pathname]);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const closeOnEscape = event => {
+      if (event.key !== 'Escape') return;
+      setMenu(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [menu]);
 
   const auth = async form => {
     const result = authMode === 'login' ? await api.login(form) : await api.register(form);
@@ -88,12 +101,9 @@ export default function App() {
   return <>
     <header className="topbar">
       <Link className="brand" to="/"><span className="brand-mark"><ShipWheel size={20} /></span>Tide<span>Market</span></Link>
-      <button className="mobile-menu" onClick={() => setMenu(!menu)} aria-label={menu ? 'Close navigation' : 'Open navigation'}>{menu ? <X /> : <Menu />}</button>
-      <nav className={menu ? 'open' : ''}>
+      <button ref={menuButtonRef} className="mobile-menu" onClick={() => setMenu(!menu)} aria-label={menu ? 'Close navigation' : 'Open navigation'} aria-expanded={menu} aria-controls="site-navigation">{menu ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}</button>
+      <nav id="site-navigation" className={menu ? 'open' : ''} aria-label="Primary navigation">
         {!user && <><NavLink to="/" onClick={() => setMenu(false)}>Home</NavLink><NavLink to="/auctions" onClick={() => setMenu(false)}>Auctions</NavLink><button className="button dark" onClick={() => { setMenu(false); openAuth('login'); }}><LogIn size={16} /> Log in</button><button className="text-button" onClick={() => { setMenu(false); openAuth('register'); }}>Sign up</button></>}
-        {user?.role === 'buyer' && <><NavLink to="/dashboard" onClick={() => setMenu(false)}>Dashboard</NavLink><NavLink to="/auctions" onClick={() => setMenu(false)}>Auctions</NavLink><NavLink to="/bids" onClick={() => setMenu(false)}>My bids</NavLink><NavLink to="/notifications" onClick={() => setMenu(false)}>Notifications</NavLink></>}
-        {user?.role === 'fisherman' && <><NavLink to="/dashboard" onClick={() => setMenu(false)}>Dashboard</NavLink><NavLink to="/my-auctions" onClick={() => setMenu(false)}>My auctions</NavLink><NavLink to="/create-auction" onClick={() => setMenu(false)}>Create auction</NavLink><NavLink to="/orders" onClick={() => setMenu(false)}>Orders</NavLink></>}
-        {user?.role === 'admin' && <><NavLink to="/admin" onClick={() => setMenu(false)}>Admin dashboard</NavLink><NavLink to="/admin/listings" onClick={() => setMenu(false)}>Listings</NavLink><NavLink to="/admin/requests" onClick={() => setMenu(false)}>Buyer requests</NavLink></>}
         {user && <><button className="user-name profile-trigger" onClick={() => { setMenu(false); navigate('/profile'); }} aria-label={`Open ${user.role} profile for ${user.name}`}><UserRound size={15} /> {user.name}</button><button className="text-button" onClick={() => { setMenu(false); logout(); }}>Log out</button></>}
       </nav>
     </header>
@@ -168,7 +178,7 @@ function ProfilePage({ user, onLogout }) {
     ? [
       ['/admin/fishermen', <Users size={17} />, 'Manage fishermen', 'Review partner accounts'],
       ['/admin/listings', <Store size={17} />, 'Marketplace listings', 'Review published catches'],
-      ['/admin/requests', <ClipboardList size={17} />, 'Buyer requests', 'Approve buyer signups'],
+      ['/admin/requests', <ClipboardList size={17} />, 'Fisherman approvals', 'Approve fisherman registrations'],
       ['/admin/bids', <Gavel size={17} />, 'Bid review', 'Review auction activity']
     ]
     : fisherman
@@ -223,9 +233,11 @@ function NotFound({ user }) {
 }
 
 function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
+  const dialogRef = useRef(null);
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
   const [pending, setPending] = useState(null);
+  const [registrationComplete, setRegistrationComplete] = useState('');
   const [otp, setOtp] = useState('');
   const [seconds, setSeconds] = useState(0);
   const [submittingOtp, setSubmittingOtp] = useState(false);
@@ -240,6 +252,12 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   const [resetMessage, setResetMessage] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  useDialogAccessibility({
+    open: true,
+    dialogRef,
+    onClose,
+    focusKey: `${mode}:${resetStep || (registrationComplete ? 'registration-complete' : pending ? 'registration-otp' : 'form')}`
+  });
   const change = event => setForm({ ...form, [event.target.name]: event.target.value });
   useEffect(() => {
     if (!seconds) return undefined;
@@ -253,6 +271,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   }, [resetSeconds]);
   useEffect(() => {
     setPending(null);
+    setRegistrationComplete('');
     setOtp('');
     setSeconds(0);
     setError('');
@@ -380,13 +399,13 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
     setSubmittingOtp(true);
     try {
       const result = await api.verifyOtp({ email: pending.email, otp });
-      if (result.status === 'pending') {
+      if (result.status === 'pending_admin') {
         setPending(null);
         setOtp('');
-        setError(result.message);
-        onSwitch();
+        setRegistrationComplete(result.message);
         return;
       }
+      if (!result.token || !result.user) throw new Error('Email verification could not complete account activation.');
       onAuthenticated(result);
     } catch (err) {
       setError(err.message);
@@ -409,17 +428,19 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
   };
 
   return <div className="modal-backdrop" onClick={onClose}>
-    <div className="modal auth-modal" onClick={event => event.stopPropagation()}>
-      <button className="close" onClick={onClose}>×</button>
+    <div ref={dialogRef} className="modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title" onClick={event => event.stopPropagation()}>
+      <button className="close" type="button" aria-label="Close dialog" onClick={onClose}>×</button>
       <p className="kicker">TIDEMARKET ACCOUNT</p>
       {resetStep ? <>
         {resetStep === 'email' && <>
-          <h2>Reset your password.</h2>
+          <h2 id="auth-modal-title">Reset your password.</h2>
           <p>Enter your account email to receive a verification code.</p>
           <form onSubmit={requestResetOtp} autoComplete="on">
             <input
               name="resetEmail"
               type="email"
+              aria-label="Email address"
+              data-dialog-autofocus="true"
               placeholder="Email address"
               autoComplete="email"
               value={resetEmail}
@@ -434,12 +455,14 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
           </form>
         </>}
         {resetStep === 'otp' && <>
-          <h2>Verify your email.</h2>
+          <h2 id="auth-modal-title">Verify your email.</h2>
           <p>{resetMessage}</p>
           <p>Enter the 6-digit code sent to {resetEmail.replace(/(^.).*(@.*$)/, '$1•••$2')}.</p>
           <form onSubmit={verifyResetOtp} autoComplete="one-time-code">
             <input
               name="resetOtp"
+              aria-label="Six-digit password reset code"
+              data-dialog-autofocus="true"
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={6}
@@ -457,11 +480,13 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
           </form>
         </>}
         {resetStep === 'password' && <>
-          <h2>Choose a new password.</h2>
-          <form onSubmit={updatePassword} autoComplete="new-password">
+          <h2 id="auth-modal-title">Choose a new password.</h2>
+          <form onSubmit={updatePassword} autoComplete="on">
             <input
               name="newPassword"
               type="password"
+              aria-label="New password"
+              data-dialog-autofocus="true"
               placeholder="New password"
               autoComplete="new-password"
               minLength={8}
@@ -473,6 +498,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
             <input
               name="confirmNewPassword"
               type="password"
+              aria-label="Confirm new password"
               placeholder="Confirm new password"
               autoComplete="new-password"
               minLength={8}
@@ -487,34 +513,41 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
           </form>
         </>}
         {resetStep === 'success' && <>
-          <h2>Password updated.</h2>
+          <h2 id="auth-modal-title">Password updated.</h2>
           <p>{resetMessage}</p>
           <button className="button primary full" type="button" onClick={backToLogin}>Back to Login</button>
         </>}
+      </> : registrationComplete ? <>
+        <h2 id="auth-modal-title">Email verified.</h2>
+        <p>{registrationComplete}</p>
+        <button className="button primary full" type="button" onClick={() => {
+          setRegistrationComplete('');
+          onSwitch();
+        }}>Go to login</button>
       </> : pending ? <>
-        <h2>Verify your email.</h2>
+        <h2 id="auth-modal-title">Verify your email.</h2>
         <p>Enter the 6-digit code sent to {pending.email.replace(/(^.).*(@.*$)/, '$1•••$2')}.</p>
         <form onSubmit={verifyOtp} autoComplete="one-time-code">
-          <input name="otp" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="6-digit code" value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} required />
+          <input name="otp" aria-label="Six-digit registration code" data-dialog-autofocus="true" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="6-digit code" value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} required />
           {error && <p className="form-error">{error}</p>}
           {seconds <= 0 ? <button className="switch-auth" type="button" onClick={resendOtp} disabled={resending}>{resending ? 'Sending…' : 'Resend OTP'}</button> : <p>Resend available in {seconds}s</p>}
           <button className="button primary full" type="submit" disabled={submittingOtp}>{submittingOtp ? 'Verifying…' : 'Verify email'}</button>
         </form>
       </> : <>
-        <h2>{mode === 'login' ? 'Welcome back to the water.' : 'Create your account.'}</h2>
+        <h2 id="auth-modal-title">{mode === 'login' ? 'Welcome back to the water.' : 'Create your account.'}</h2>
         <form onSubmit={submit} autoComplete="on">
           {mode === 'register' && <>
-            <input name="name" placeholder="Full name" autoComplete="name" onChange={change} required />
-            <input name="phone" placeholder="Mobile number" autoComplete="tel" onChange={change} />
-            <select name="role" value={form.role || ''} onChange={change} required>
+            <input name="name" aria-label="Full name" data-dialog-autofocus="true" placeholder="Full name" autoComplete="name" onChange={change} required />
+            <input name="phone" aria-label="Mobile number, optional" placeholder="Mobile number" autoComplete="tel" onChange={change} />
+            <select name="role" aria-label="Account role" value={form.role || ''} onChange={change} required>
               <option value="" disabled>Select account role</option>
               <option value="buyer">Buyer</option>
               <option value="fisherman">Fisherman</option>
             </select>
           </>}
-          <input name="email" type="email" placeholder="Email address" autoComplete="username" onChange={change} required />
+          <input name="email" aria-label="Email address" data-dialog-autofocus={mode === 'login' ? 'true' : undefined} type="email" placeholder="Email address" autoComplete="username" onChange={change} required />
           <div className="password-field">
-            <input name="password" type={showPassword ? 'text' : 'password'} placeholder="Password" onChange={change} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} />
+            <input name="password" aria-label="Password" data-dialog-autofocus={mode === 'register' ? 'true' : undefined} type={showPassword ? 'text' : 'password'} placeholder="Password" onChange={change} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} />
             <button className="password-toggle" type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword(visible => !visible)}>
               {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
             </button>
@@ -528,7 +561,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
           <button className="button primary full" type="submit">{mode === 'login' ? 'Log in' : 'Create account'}</button>
         </form>
       </>}
-      {!resetStep && <p className="switch-auth-prompt">
+      {!resetStep && !registrationComplete && <p className="switch-auth-prompt">
         {mode === 'login' ? 'New to TideMarket?' : 'Already have an account?'}
         <button className="switch-auth" onClick={onSwitch}>{mode === 'login' ? 'Sign up' : 'Log in'}</button>
       </p>}

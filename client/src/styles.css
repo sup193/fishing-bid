@@ -106,7 +106,7 @@
   :root{
     --ink:#173a43;
     --deep:#102c35;
-    --coral:#c94e39;
+    --coral:#b34332;
     --sun:#ffd166;
     --foam:#f3f8f7;
     --muted:#52666c;
@@ -118,7 +118,7 @@
   }
   body{background:var(--foam);color:var(--ink);font-family:'Manrope',Arial,sans-serif;letter-spacing:-.01em}
   ::selection{background:#b9e8dc;color:var(--deep)}
-  :focus-visible{outline:3px solid #4bb9a5;outline-offset:3px}
+  :focus-visible{outline:3px solid #075e58;outline-offset:3px}
   .topbar{background:#f8fbfaeF;backdrop-filter:blur(16px);border-bottom:1px solid #dce7e599}
   .brand{letter-spacing:-.9px}
   .brand-mark{background:linear-gradient(145deg,#177e78,#173a43);box-shadow:0 5px 13px #173a4325}
@@ -319,8 +319,8 @@
 .market-price-card>div span{color:var(--muted);font-size:10px}
 .market-price-card>b{white-space:nowrap;color:var(--ink);font-size:17px}
 .market-price-card>b small{color:var(--muted);font-size:10px;font-weight:500}
-@keyframes price-highlights-arrive{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-@keyframes price-card-arrive{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes price-highlights-arrive{from{transform:translateY(14px)}to{transform:translateY(0)}}
+@keyframes price-card-arrive{from{transform:translateY(10px)}to{transform:translateY(0)}}
 .market-filter-panel{margin-bottom:23px;padding:19px;border:1px solid #d8e6e2;border-radius:13px;background:#f1f7f5}
 .market-filter-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}
 .market-filter-heading>div{display:flex;align-items:center;gap:8px;color:var(--ink)}
@@ -457,7 +457,7 @@
 .photo-search-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .market-photo-search-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:0 12px;border:1px solid #d5e5e0;border-radius:8px;background:#edf5f2;color:var(--sea);font-size:11px;font-weight:800;white-space:nowrap}
 .market-photo-search-button:hover:not(:disabled){background:#dcece7}
-.market-photo-search-button:disabled{opacity:.6;cursor:wait}
+.market-photo-search-button:disabled{cursor:wait}
 .photo-search-result{display:grid;gap:9px;margin:12px 0 0;padding:12px 14px;border:1px solid #d5e5e0;border-radius:9px;background:#f1f7f5}
 .photo-search-result>div:first-child{display:grid;gap:3px}
 .photo-search-result strong{color:var(--ink);font-size:12px}
@@ -570,11 +570,11 @@
 .admin-hero h1 em{color:#ffe09a;font-family:'Fraunces',Georgia,serif;font-weight:600}
 .admin-hero-copy>p:not(.kicker){max-width:495px;margin:12px 0 20px;color:#d5e9e7;font-size:13px;line-height:1.7}
 .admin-hero-actions{display:flex;align-items:center;gap:15px}
-.admin-hero .button.primary{min-height:45px;padding:0 18px;border:1px solid #ffffff38;border-radius:10px;background:linear-gradient(135deg,#f47a58,#e66349);color:#fff;box-shadow:0 9px 24px #071d2c50;transition:transform .2s,box-shadow .2s,filter .2s}
+.admin-hero .button.primary{min-height:45px;padding:0 18px;border:1px solid #ffffff38;border-radius:10px;background:linear-gradient(135deg,#b34332,#a63e2e);color:#fff;box-shadow:0 9px 24px #071d2c50;transition:transform .2s,box-shadow .2s,filter .2s}
 .admin-hero .button.primary:hover{transform:translateY(-2px);filter:brightness(1.06);box-shadow:0 13px 28px #071d2c66}
 .admin-refresh{display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:0 14px;border:1px solid #ffffff38;border-radius:10px;background:#ffffff0d;color:#eff8f5;font-size:11px;font-weight:700;backdrop-filter:blur(8px);transition:background .18s,border-color .18s,transform .18s}
 .admin-refresh:hover:not(:disabled){transform:translateY(-1px);border-color:#ffffff70;background:#ffffff1a}
-.admin-refresh:disabled{cursor:wait;opacity:.72}
+.admin-refresh:disabled{cursor:wait}
 .admin-spinning{animation:admin-spin .9s linear infinite}
 @keyframes admin-spin{to{transform:rotate(360deg)}}
 @keyframes admin-hero-orbit{from{transform:translate3d(0,0,0) rotate(-8deg)}to{transform:translate3d(-18px,14px,0) rotate(7deg)}}
@@ -686,7 +686,7 @@
 .listing-description textarea{min-height:76px;resize:vertical;line-height:1.5}
 .fisherman-view .listing-page .listing-publish-button{justify-self:start;min-height:43px;padding:0 18px;border:1px solid #ffffff50;border-radius:9px;background:linear-gradient(110deg,#137f72,#248e78);box-shadow:0 8px 18px #177e7828;transition:transform .18s,box-shadow .18s,filter .18s}
 .fisherman-view .listing-page .listing-publish-button:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.06);box-shadow:0 12px 23px #177e7838}
-.fisherman-view .listing-page .listing-publish-button:disabled{opacity:.55;box-shadow:none}
+.fisherman-view .listing-page .listing-publish-button:disabled{box-shadow:none}
 @media(max-width:850px){
   .fisherman-view .listing-page .listing-form{grid-template-columns:1fr}
   .listing-image-column{grid-template-columns:minmax(0,1fr) minmax(140px,.7fr);align-items:center}
@@ -775,7 +775,7 @@
 .admin-fishermen-grid .person-button:nth-child(4n)::before{background:#e27668}
 .admin-fishermen-grid .person-button:hover{z-index:1;transform:translateY(-3px);border-color:#a9d2c5;background:#fafffd;box-shadow:0 12px 24px #173a4315}
 .admin-fishermen-grid .person-button:hover::before{width:5px}
-.admin-fishermen-grid .person-button:focus-visible{outline:3px solid #4bb9a5;outline-offset:2px}
+.admin-fishermen-grid .person-button:focus-visible{outline:3px solid #075e58;outline-offset:2px}
 .admin-fishermen-grid .person-button .avatar{display:grid;place-items:center;flex:0 0 auto;width:42px;height:42px;border:1px solid #a9ddcc;border-radius:13px;background:linear-gradient(145deg,#c8f2e3,#8bcab6);color:#145c52;font-size:15px;box-shadow:0 5px 12px #177e7818}
 .admin-fishermen-grid .person-button:nth-child(4n + 2) .avatar{border-color:#d6c9ff;background:linear-gradient(145deg,#e6deff,#b9aaf2);color:#56439a;box-shadow:0 5px 12px #8065df1b}
 .admin-fishermen-grid .person-button:nth-child(4n + 3) .avatar{border-color:#f2dfa9;background:linear-gradient(145deg,#fff0c1,#edc96d);color:#8e671a;box-shadow:0 5px 12px #e4a62c20}
@@ -936,8 +936,8 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 }
 
 @keyframes market-rise-in{
-  from{opacity:0;transform:translateY(16px)}
-  to{opacity:1;transform:translateY(0)}
+  from{transform:translateY(16px)}
+  to{transform:translateY(0)}
 }
 @keyframes trend-bar-rise{
   from{transform:scaleY(.35);opacity:.45}
@@ -984,8 +984,8 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .admin-listing-status.removed{background:#f1f1ed;color:#75827d}
 .admin-listing-remove{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-height:34px;padding:0 10px;border:1px solid #efd0c9;border-radius:8px;background:#fff7f5;color:#ad3d2e;font-size:10px;font-weight:800;transition:background .18s,border-color .18s}
 .admin-listing-remove:hover:not(:disabled){border-color:#d9897c;background:#ffebe6}
-.admin-listing-remove:disabled{cursor:wait;opacity:.65}
-.admin-market-listing.is-removed{opacity:.72}
+.admin-listing-remove:disabled{cursor:wait}
+.admin-market-listing.is-removed{background:#f1f1ed;border-color:#d4d8d5}
 @media(max-width:600px){
   .admin-market-listing{flex-wrap:wrap;gap:9px}
   .admin-market-listing-info{width:calc(100% - 70px);flex:auto}
@@ -1127,7 +1127,7 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
   border-color:#9bcfc3;
   box-shadow:0 5px 16px #17665e16;
 }
-.profile-trigger:focus-visible{outline:3px solid #0b9a9140;outline-offset:2px}
+.profile-trigger:focus-visible{outline:3px solid #075e58;outline-offset:3px}
 .profile-backdrop{z-index:15}
 .profile-dialog{
   position:relative;
@@ -1365,7 +1365,7 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .buyer-notification p{margin:0;color:#52686c;font-size:10px;line-height:1.5}
 .buyer-notification small{color:var(--muted);font-size:9px}
 .buyer-notification button{flex:0 0 auto;padding:6px 9px;border:1px solid #d6e7e1;border-radius:7px;background:#f3faf7;color:#176e67;font-size:9px;font-weight:800}
-.buyer-notification.is-read{opacity:.68}
+.buyer-notification.is-read{background:#f6f8f7}
 .auction-detail-modal{max-width:680px;max-height:calc(100vh - 28px);overflow-y:auto;padding:28px}
 .auction-detail-modal .detail-photo{max-height:185px;border-radius:11px;object-fit:cover}
 .auction-seller{margin:8px 0;color:#637772;font-size:12px}
@@ -1396,7 +1396,7 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .auction-bid-form>label,.automatic-bid-panel>label{display:block;margin-bottom:7px;color:#48635e;font-size:10px;font-weight:800}
 .auction-detail-modal .bid-box{margin-top:0}
 .auction-detail-modal .bid-box input{min-width:0;border-radius:8px}
-.auction-detail-modal .button:disabled{cursor:not-allowed;opacity:.6;transform:none}
+.auction-detail-modal .button:disabled{cursor:not-allowed;transform:none}
 .automatic-bid-panel{display:grid;gap:9px;margin-top:14px;padding:14px;border:1px solid #d8e5e0;border-radius:11px;background:linear-gradient(135deg,#f1f8f5,#fbfcf8)}
 .automatic-bid-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .automatic-bid-heading .kicker{margin:0 0 3px;font-size:8px}
@@ -1410,7 +1410,7 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .auction-ai-guide .auction-panel-heading,.auction-chat .auction-panel-heading{margin:-13px -13px 0}
 .auction-ai-guide .auction-panel-heading h3,.auction-chat .auction-panel-heading h3{display:flex;align-items:center;gap:6px}
 .auction-ai-guide>p{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0;color:#48635e;font-size:10px}
-.auction-ai-guide>small,.auction-chat>small{color:#63777d;font-size:9px;line-height:1.45}
+.auction-ai-guide>small,.auction-chat>small{color:#52666c;font-size:9px;line-height:1.45}
 .auction-chat-messages{display:grid;gap:7px;max-height:210px;overflow:auto}
 .auction-chat-message{padding:9px;border:1px solid #e1ebe6;border-radius:8px;background:#fff}
 .auction-chat-message>div{display:flex;justify-content:space-between;gap:8px;color:#174b48;font-size:10px}
@@ -1482,7 +1482,7 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .demand-heading p:not(.kicker){max-width:680px;margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.55}
 .demand-heading .kicker{margin:0 0 5px}
 .demand-refresh{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:10px;font-weight:800;white-space:nowrap}
-.demand-refresh:disabled{opacity:.6}
+.demand-refresh:disabled{cursor:wait}
 .demand-spinning{animation:demandSpin 1s linear infinite}
 @keyframes demandSpin{to{transform:rotate(360deg)}}
 .demand-filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}
@@ -1529,9 +1529,19 @@ button:not(:disabled):active,.button:active{transform:scale(.97);filter:brightne
 .demand-available{flex-wrap:wrap}
 .demand-available small{color:var(--muted);font-size:8px}
 .demand-available button{display:inline-flex;align-items:center;gap:4px;padding:6px 8px;border:1px solid #dce8e3;border-radius:6px;background:#f7fbf9;color:#246a60;font-size:8px;font-weight:800}
-.demand-available button:disabled{opacity:.55;cursor:not-allowed}
+.demand-available button:disabled{cursor:not-allowed}
 .demand-locations{display:grid;gap:8px}
 .demand-categories{display:grid;gap:8px}
+
+button:disabled,.button:disabled{opacity:1;cursor:not-allowed;filter:none}
+.button.primary:disabled,.guest-primary:disabled,.market-buy-button:disabled,.fisherman-hero .button.primary:disabled,.admin-hero .button.primary:disabled,.listing-publish-button:disabled{
+  border-color:#c3d6d1!important;
+  background:#dce7e5!important;
+  color:#405b59!important;
+  box-shadow:none!important;
+}
+:focus-visible{outline:3px solid #075e58!important;outline-offset:3px!important}
+.guest-hero :focus-visible,.fisherman-hero :focus-visible,.admin-hero :focus-visible{outline-color:#fff!important}
 .demand-categories>strong{font-size:10px}
 .demand-categories>div{display:flex;flex-wrap:wrap;gap:6px}
 .demand-categories>div span{padding:6px 8px;border-radius:15px;background:#f1f6f3;color:#526b63;font-size:8px}

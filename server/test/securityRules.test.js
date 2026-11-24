@@ -41,4 +41,17 @@ test('Supabase migration enables default-deny RLS and keeps privileged operation
   assert.match(resetMigration, /ALTER TABLE public\.password_reset_tokens ENABLE ROW LEVEL SECURITY/);
   assert.match(resetMigration, /REVOKE ALL ON FUNCTION public\.tidemarket_reset_password/);
   assert.match(resetMigration, /GRANT EXECUTE ON FUNCTION public\.tidemarket_reset_password.* TO service_role/);
+
+  const approvalMigration = fs.readFileSync(
+    path.join(projectRoot, 'supabase', 'migrations', '202611240001_fisherman_registration_approval.sql'),
+    'utf8'
+  );
+  assert.match(approvalMigration, /CREATE OR REPLACE FUNCTION public\.tidemarket_consume_registration_otp/);
+  assert.match(approvalMigration, /INSERT INTO public\.users/);
+  assert.match(approvalMigration, /INSERT INTO public\.registration_requests/);
+  assert.match(approvalMigration, /'pending_admin'/);
+  assert.match(approvalMigration, /CREATE OR REPLACE FUNCTION public\.tidemarket_review_fisherman_registration/);
+  assert.match(approvalMigration, /FOR UPDATE/);
+  assert.match(approvalMigration, /GRANT EXECUTE ON FUNCTION public\.tidemarket_review_fisherman_registration.* TO service_role/);
+  assert.match(approvalMigration, /users\.role = 'fisherman'/);
 });

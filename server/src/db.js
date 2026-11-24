@@ -183,6 +183,26 @@ export async function getPendingRegistration(email) {
   return normalizeRow(data);
 }
 
+export async function getLatestFishermanRegistrationRequest(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  if (isLocalDatabase()) {
+    return Object.entries(readLocalDb().registrationRequests || {})
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.role === 'fisherman' && String(item.email || '').trim().toLowerCase() === normalizedEmail)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0] || null;
+  }
+  const { data, error } = await initSupabase().from('registration_requests')
+    .select('*')
+    .eq('email', normalizedEmail)
+    .eq('role', 'fisherman')
+    .order('createdAt', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeRow(data);
+}
+
 export async function issuePasswordResetOtp({ email, otpId, otpHash, expiresAt, now }) {
   const normalizedEmail = email.trim().toLowerCase();
   if (isLocalDatabase()) {
@@ -350,6 +370,83 @@ export async function resetPasswordWithToken({ tokenHash, passwordHash, now }) {
   return data;
 }
 
+export async function reviewFishermanRegistration({ requestId, action, adminId, userId }) {
+  if (!['approve', 'reject'].includes(action)) throw new Error('Unsupported fisherman registration action');
+  const now = new Date().toISOString();
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const request = store.registrationRequests?.[requestId];
+    if (!request || request.role !== 'fisherman' || request.status !== 'pending') {
+      return { status: 'not_found' };
+    }
+
+    const users = store.users || {};
+    const existing = Object.entries(users)
+      .map(([id, user]) => ({ id, ...user }))
+      .find(user => String(user.email || '').trim().toLowerCase() === String(request.email || '').trim().toLowerCase());
+    if (action === 'approve') {
+      if (existing && existing.role !== 'fisherman') return { status: 'duplicate' };
+      if (request.phone && Object.entries(users).some(([id, user]) =>
+        id !== existing?.id && String(user.phone || '').trim() === request.phone)) {
+        return { status: 'duplicate' };
+      }
+
+      const fishermanId = existing?.id || userId;
+      const fisherman = {
+        ...(existing || {}),
+        id: undefined,
+        name: request.name,
+        email: String(request.email).trim().toLowerCase(),
+        passwordHash: request.passwordHash,
+        role: 'fisherman',
+        phone: request.phone || existing?.phone,
+        location: request.location || existing?.location,
+        verificationStatus: 'verified',
+        verificationUpdatedAt: now,
+        verificationUpdatedBy: adminId,
+        demo: existing?.demo || false,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now
+      };
+      delete fisherman.id;
+      users[fishermanId] = fisherman;
+      store.users = users;
+      store.registrationRequests[requestId] = {
+        ...request,
+        status: 'accepted',
+        reviewedAt: now,
+        reviewedBy: adminId,
+        updatedAt: now
+      };
+      writeLocalDb(store);
+      return { status: 'approved', user: { id: fishermanId, ...fisherman } };
+    }
+
+    store.registrationRequests[requestId] = {
+      ...request,
+      status: 'rejected',
+      reviewedAt: now,
+      reviewedBy: adminId,
+      updatedAt: now
+    };
+    writeLocalDb(store);
+    return { status: 'rejected' };
+  }
+
+  const { data, error } = await initSupabase().rpc('tidemarket_review_fisherman_registration', {
+    p_request_id: requestId,
+    p_action: action,
+    p_admin_id: adminId,
+    p_user_id: userId,
+    p_now: now
+  });
+  if (error) throw error;
+  if (data?.status === 'approved' && data.userId) {
+    return { ...data, user: await get('users', data.userId) };
+  }
+  return data;
+}
+
 export async function consumePendingRegistration({ email, otpHash, userId }) {
   if (isLocalDatabase()) {
     const store = readLocalDb();
@@ -369,19 +466,52 @@ export async function consumePendingRegistration({ email, otpHash, userId }) {
     }
     const users = store.users || {};
     const registrationRequests = store.registrationRequests || {};
-    if (Object.values(users).some(user => String(user.email).toLowerCase() === pending.email)
-      || Object.values(registrationRequests).some(request => String(request.email).toLowerCase() === pending.email && request.status === 'pending')) {
+    const existingUser = Object.entries(users)
+      .map(([id, user]) => ({ id, ...user }))
+      .find(user => String(user.email).trim().toLowerCase() === pending.email);
+    const latestRequest = Object.values(registrationRequests)
+      .filter(request => request.role === 'fisherman' && String(request.email || '').trim().toLowerCase() === pending.email)
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0))[0];
+    const isFishermanResubmission = pending.role === 'fisherman'
+      && existingUser?.role === 'fisherman'
+      && latestRequest?.status === 'rejected';
+    const hasPendingFishermanRequest = pending.role === 'fisherman'
+      && Object.values(registrationRequests).some(request =>
+        request.role === 'fisherman'
+        && String(request.email || '').trim().toLowerCase() === pending.email
+        && request.status === 'pending');
+    if ((existingUser && !isFishermanResubmission)
+      || hasPendingFishermanRequest
+      || (pending.phone && Object.entries(users).some(([id, user]) =>
+        id !== existingUser?.id && String(user.phone || '').trim() === pending.phone))
+      || (pending.phone && pending.role === 'fisherman' && Object.values(registrationRequests).some(request =>
+        request.role === 'fisherman' && request.status === 'pending' && String(request.phone || '').trim() === pending.phone))) {
       store.pendingRegistrations[pending.id].consumedAt = new Date().toISOString();
       writeLocalDb(store);
       return { status: 'duplicate' };
     }
     const now = new Date().toISOString();
     if (pending.role === 'buyer') {
-      registrationRequests[`registration_${crypto.randomUUID()}`] = {
+      users[userId] = {
         name: pending.name,
         email: pending.email,
         passwordHash: pending.passwordHash,
         role: 'buyer',
+        phone: pending.phone,
+        location: pending.location,
+        verificationStatus: 'verified',
+        demo: false,
+        createdAt: now,
+        updatedAt: now
+      };
+      store.users = users;
+    } else {
+      const requestId = `registration_${crypto.randomUUID()}`;
+      registrationRequests[requestId] = {
+        name: pending.name,
+        email: pending.email,
+        passwordHash: pending.passwordHash,
+        role: 'fisherman',
         phone: pending.phone,
         location: pending.location,
         status: 'pending',
@@ -389,31 +519,22 @@ export async function consumePendingRegistration({ email, otpHash, userId }) {
         updatedAt: now
       };
       store.registrationRequests = registrationRequests;
-    } else {
-      users[userId] = {
-        name: pending.name,
-        email: pending.email,
-        passwordHash: pending.passwordHash,
-        role: 'fisherman',
-        phone: pending.phone,
-        location: pending.location,
-        verificationStatus: 'unverified',
-        demo: false,
-        createdAt: now,
-        updatedAt: now
-      };
-      store.users = users;
     }
     store.pendingRegistrations[pending.id].verifiedAt = now;
     store.pendingRegistrations[pending.id].consumedAt = now;
     store.pendingRegistrations[pending.id].updatedAt = now;
     writeLocalDb(store);
     if (pending.role === 'buyer') {
-      return { status: 'pending_admin', email: pending.email, name: pending.name, role: 'buyer' };
+      return {
+        status: 'verified',
+        userId,
+        email: pending.email,
+        name: pending.name,
+        role: 'buyer'
+      };
     }
     return {
-      status: 'verified',
-      userId,
+      status: 'pending_admin',
       name: pending.name,
       email: pending.email,
       role: 'fisherman',

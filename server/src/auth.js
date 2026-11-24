@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { get, sanitizeUser } from './db.js';
+import { get, getLatestFishermanRegistrationRequest, sanitizeUser } from './db.js';
 
 function jwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
@@ -21,6 +21,18 @@ export async function requireAuth(req, res, next) {
     const payload = jwt.verify(token, jwtSecret());
     const user = await get('users', payload.id);
     if (!user) return res.status(401).json({ message: 'User not found' });
+    if (user.role === 'fisherman') {
+      const request = await getLatestFishermanRegistrationRequest(user.email);
+      if (request?.status === 'pending') {
+        return res.status(403).json({ message: 'Your fisherman registration is awaiting admin approval.' });
+      }
+      if (request?.status === 'rejected') {
+        return res.status(403).json({ message: 'Your fisherman registration was rejected. Submit a new registration to try again.' });
+      }
+      if (['pending', 'rejected'].includes(String(user.verificationStatus || '').toLowerCase())) {
+        return res.status(403).json({ message: 'Your fisherman account is not approved.' });
+      }
+    }
     const tokenVersion = Number(user.tokenVersion || 0);
     if ((payload.tokenVersion === undefined && tokenVersion !== 0)
       || (payload.tokenVersion !== undefined && Number(payload.tokenVersion) !== tokenVersion)) {

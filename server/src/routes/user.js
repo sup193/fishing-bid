@@ -9,7 +9,7 @@ import path from 'node:path';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, consumePendingRegistration, issuePasswordResetOtp, consumePasswordResetOtp, resetPasswordWithToken, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, getLatestFishermanRegistrationRequest, consumePendingRegistration, issuePasswordResetOtp, consumePasswordResetOtp, resetPasswordWithToken, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -459,14 +459,23 @@ router.post('/auth/register', async (req, res) => {
       return res.status(400).json({ message: 'Use a valid name and email, role, and password between 8 and 128 characters' });
     }
     const users = await list('users');
-    if (users.some(user => normalizeOtpEmail(user.email) === email)) {
+    const existingUser = users.find(user => normalizeOtpEmail(user.email) === email);
+    const latestFishermanRequest = role === 'fisherman'
+      ? await getLatestFishermanRegistrationRequest(email)
+      : null;
+    const isRejectedFishermanResubmission = role === 'fisherman'
+      && existingUser?.role === 'fisherman'
+      && latestFishermanRequest?.status === 'rejected';
+    if (existingUser && !isRejectedFishermanResubmission) {
       return res.status(409).json({ message: 'Email is already registered' });
     }
-    if (phone && users.some(user => String(user.phone || '').trim() === phone)) {
+    if (phone && users.some(user =>
+      user.id !== (isRejectedFishermanResubmission ? existingUser.id : null)
+      && String(user.phone || '').trim() === phone)) {
       return res.status(409).json({ message: 'Phone number is already registered' });
     }
-    const pendingRequests = role === 'buyer'
-      ? (await list('registrationRequests')).filter(request => request.status === 'pending')
+    const pendingRequests = role === 'fisherman'
+      ? (await list('registrationRequests')).filter(request => request.role === 'fisherman' && request.status === 'pending')
       : [];
     if (pendingRequests.some(request => normalizeOtpEmail(request.email) === email)) {
       return res.status(409).json({ message: 'A registration request is already pending for this email.', status: 'pending' });
@@ -476,6 +485,9 @@ router.post('/auth/register', async (req, res) => {
     }
     const existingPending = await getPendingRegistration(email);
     if (existingPending) {
+      if (existingPending.role !== role) {
+        return res.status(409).json({ message: 'A different account role already has an email verification in progress.' });
+      }
       const elapsed = Date.now() - Date.parse(existingPending.lastSentAt || 0);
       const retryAfter = elapsed >= OTP_RESEND_COOLDOWN_MS ? 0 : Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
       return res.status(202).json({
@@ -484,6 +496,7 @@ router.post('/auth/register', async (req, res) => {
           ? 'Continue with the pending verification. A resend will be available shortly.'
           : 'Continue with the pending verification or resend the code.',
         email,
+        role,
         expiresAt: existingPending.expiresAt,
         resendAvailableIn: retryAfter
       });
@@ -514,6 +527,7 @@ router.post('/auth/register', async (req, res) => {
       status: 'pending',
       message: 'Verification code sent.',
       email,
+      role,
       expiresAt: new Date(now.getTime() + OTP_TTL_MS).toISOString()
     });
   } catch (error) {
@@ -543,12 +557,13 @@ router.post('/auth/verify-otp', async (req, res) => {
     if (result.status === 'expired') return res.status(410).json({ message: 'Verification code has expired. Request a new code.' });
     if (result.status === 'locked') return res.status(429).json({ message: 'Maximum verification attempts reached. Request a new code.' });
     if (result.status === 'incorrect') return res.status(400).json({ message: 'Incorrect verification code', remainingAttempts: result.remainingAttempts });
-    if (result.status === 'duplicate') return res.status(409).json({ message: 'Email is already registered or awaiting approval' });
+    if (result.status === 'duplicate') return res.status(409).json({ message: 'Email or phone number is already registered or awaiting approval' });
     if (result.status === 'pending_admin') {
       return res.status(202).json({
-        status: 'pending',
-        message: 'Registration verified. An admin must approve your buyer account before you can sign in.',
-        email
+        status: 'pending_admin',
+        role: 'fisherman',
+        message: 'Your email has been verified successfully. Your fisherman registration is awaiting admin approval. You will be able to log in once your account is approved.',
+        email: result.email || email
       });
     }
     if (result.status !== 'verified') return res.status(400).json({ message: 'Verification could not be completed' });
@@ -773,13 +788,46 @@ router.post('/auth/login', async (req, res) => {
     }
     const user = (await list('users')).find(item => normalizeOtpEmail(item.email) === email);
     if (!user) {
-      const request = (await list('registrationRequests')).find(item =>
-        normalizeOtpEmail(item.email) === email && item.status === 'pending');
-      if (request) return res.status(403).json({ message: 'Your account request is still pending admin approval.', status: 'pending' });
+      const request = await getLatestFishermanRegistrationRequest(email);
+      if (request && await bcrypt.compare(req.body.password, request.passwordHash)) {
+        if (request.status === 'pending') {
+          return res.status(403).json({
+            message: 'Your fisherman registration is awaiting admin approval.',
+            status: 'pending'
+          });
+        }
+        if (request.status === 'rejected') {
+          return res.status(403).json({
+            message: 'Your fisherman registration was rejected. You may submit a new registration with updated information.',
+            status: 'rejected'
+          });
+        }
+      }
       return res.status(401).json({ message: 'Invalid email or password' });
     }
     if (!(await bcrypt.compare(req.body.password, user.passwordHash))) {
       return res.status(401).json({ message: 'Invalid email or password' });
+    }
+    if (user.role === 'fisherman') {
+      const request = await getLatestFishermanRegistrationRequest(email);
+      if (request?.status === 'pending') {
+        return res.status(403).json({
+          message: 'Your fisherman registration is awaiting admin approval.',
+          status: 'pending'
+        });
+      }
+      if (request?.status === 'rejected') {
+        return res.status(403).json({
+          message: 'Your fisherman registration was rejected. You may submit a new registration with updated information.',
+          status: 'rejected'
+        });
+      }
+      if (['pending', 'rejected'].includes(String(user.verificationStatus || '').toLowerCase())) {
+        return res.status(403).json({
+          message: 'Your fisherman account is not approved.',
+          status: String(user.verificationStatus).toLowerCase()
+        });
+      }
     }
     return res.json({ token: signUser(user), user: publicUser(user) });
   } catch (error) {

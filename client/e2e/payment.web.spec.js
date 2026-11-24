@@ -1,7 +1,8 @@
 import { createHmac } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+import { e2eApiUrl } from './urls.js';
 
-const apiBase = 'http://127.0.0.1:5174/api';
+const apiBase = e2eApiUrl;
 const paymentSecret = 'test-only-e2e-razorpay-secret';
 
 test('buyer cancellation releases a listing and a verified retry persists paid order history', async ({ page }) => {
@@ -26,7 +27,7 @@ test('buyer cancellation releases a listing and a verified retry persists paid o
   await login.locator('input[name="email"]').fill('buyer-1@auction.test');
   await login.locator('input[name="password"]').fill('auction-test-password');
   await login.getByRole('button', { name: 'Log in' }).click();
-  await page.locator('.topbar nav').getByRole('link', { name: 'Auctions' }).click();
+  await page.locator('.buyer-dashboard-nav').getByRole('link', { name: 'Auctions' }).click();
 
   const prawns = page.locator('.market-listing-section[aria-labelledby="fresh-catch-title"] .market-product-card').filter({ hasText: 'Prawns' });
   await expect(prawns).toBeVisible();
