@@ -192,9 +192,15 @@ function allowPasswordResetVerification(req, email) {
 }
 
 function generateOtp() {
-  if (process.env.NODE_ENV === 'test') return globalThis.__tidemarketOtpSequence === undefined
-    ? (globalThis.__tidemarketOtpSequence = 123456, '123456')
-    : (globalThis.__tidemarketOtpSequence = 654321, '654321');
+  if (process.env.NODE_ENV === 'test') {
+    globalThis.__tidemarketOtpSequence =
+      globalThis.__tidemarketOtpSequence === 123456
+        ? 654321
+        : 123456;
+
+    return String(globalThis.__tidemarketOtpSequence);
+  }
+
   return String(randomInt(100000, 1000000));
 }
 
