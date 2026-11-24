@@ -95,7 +95,17 @@ export async function sendOtpEmail({ name, email, otp, purpose = 'registration' 
     return testSender
       ? await testSender(payload)
       : await mailTransport.sendMail(payload);
-  } catch {
-    throw Object.assign(new Error('Could not send the verification email'), { status: 502 });
+    } catch (error) {
+    console.error('OTP email delivery failed:', {
+      message: error.message,
+      code: error.code,
+      response: error.response,
+      responseCode: error.responseCode
+    });
+
+    throw Object.assign(
+      new Error('Could not send the verification email'),
+      { status: 502 }
+    );
   }
 }
