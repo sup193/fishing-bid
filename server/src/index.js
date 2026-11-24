@@ -30,7 +30,7 @@ dotenv.config({
   override: false
 });
 
-const app = express();
+export const app = express();
 
 // Vercel serverless environment detection
 const isVercel = Boolean(process.env.VERCEL);
