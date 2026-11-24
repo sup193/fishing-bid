@@ -1,4 +1,5 @@
 import { get, insert, list } from './db.js';
+import { isVerifiedPaidOrder } from './reputation.js';
 import { FISH_TYPES, QUALITIES, SIZES, predictPrice } from './utils.js';
 
 export const MIN_VERIFIED_SALES_FOR_MODEL = 50;
@@ -44,8 +45,7 @@ export function verifiedSaleObservations(orders, listings) {
     const quantity = Number(order.quantity ?? listing?.quantity);
     const amount = Number(order.amount);
     const paidAt = Date.parse(order.paidAt || order.updatedAt || order.createdAt || '');
-    if (!listing || listing.demo || order.demo || order.paymentStatus !== 'paid' || order.gateway !== 'razorpay'
-      || typeof order.transactionRef !== 'string' || !order.transactionRef
+    if (!listing || listing.demo || order.demo || !isVerifiedPaidOrder(order, listing)
       || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(amount) || amount <= 0
       || !Number.isFinite(paidAt) || !listing.fishType) return [];
     return [{

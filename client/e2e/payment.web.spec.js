@@ -1,26 +1,8 @@
-import { createHmac } from 'node:crypto';
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { e2eApiUrl } from './urls.js';
+import { e2eApiUrl, e2eWebUrl } from './urls.js';
 
-const apiBase = e2eApiUrl;
-const paymentSecret = 'test-only-e2e-razorpay-secret';
-
-test('buyer cancellation releases a listing and a verified retry persists paid order history', async ({ page }) => {
-  await page.addInitScript(() => {
-    window.Razorpay = class {
-      constructor(options) {
-        window.__razorpayTestOptions = options;
-        this.handlers = {};
-      }
-
-      on(event, handler) {
-        this.handlers[event] = handler;
-      }
-
-      open() {}
-    };
-  });
-
+test('buyer pays by dynamic UPI QR and order stays unpaid until admin verification', async ({ page, browser }) => {
   await page.goto('/login');
   const login = page.locator('.auth-modal');
   await expect(login).toBeVisible();
@@ -39,64 +21,73 @@ test('buyer cancellation releases a listing and a verified retry persists paid o
 
   const checkout = page.locator('.modal-backdrop .modal').last();
   await checkout.locator('textarea[name="address"]').fill('Test pickup, Udupi');
-  const firstOrderResponse = page.waitForResponse(response =>
-    response.url().endsWith('/api/payments/razorpay/orders') && response.request().method() === 'POST'
+  const createAttemptResponse = page.waitForResponse(response =>
+    response.url().endsWith('/api/payments/upi/orders') && response.request().method() === 'POST'
   );
   await checkout.getByRole('button', { name: 'Continue to payment' }).click();
-  const firstOrder = await firstOrderResponse;
-  expect(firstOrder.status()).toBe(201);
-  const cancelledPayment = await firstOrder.json();
-  await expect.poll(() => page.evaluate(() => window.__razorpayTestOptions?.order_id)).toBe(cancelledPayment.gatewayOrderId);
+  const createAttempt = await createAttemptResponse;
+  expect(createAttempt.status()).toBe(201);
+  const payment = await createAttempt.json();
+  expect(payment.amount).toBe(15000);
+  expect(payment.upiRecipientId).toBe('itssupriyak1@okaxis');
+  const paymentUri = new URL(payment.paymentUri.replace('upi://pay?', 'https://upi.invalid/?'));
+  expect(paymentUri.searchParams.get('pa')).toBe('itssupriyak1@okaxis');
+  expect(paymentUri.searchParams.get('am')).toBe('15000.00');
+  expect(paymentUri.searchParams.get('cu')).toBe('INR');
+  expect(paymentUri.searchParams.get('tn')).toBe(payment.orderNumber);
+  expect(paymentUri.searchParams.get('tr')).toBe(payment.upiPaymentReference);
+  await expect(checkout.getByRole('heading', { name: 'Pay by UPI QR' })).toBeVisible();
+  await expect(checkout.locator('.upi-payment-summary strong')).toHaveText('₹15,000.00');
+  await expect(checkout.getByText('itssupriyak1@okaxis')).toBeVisible();
+  await expect(checkout.locator('.upi-qr-code svg')).toBeVisible();
 
-  const cancellation = page.waitForResponse(response =>
-    response.url().endsWith('/api/payments/razorpay/failure') && response.request().method() === 'POST'
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(checkout.locator('.upi-qr-layout')).toBeVisible();
+  const layoutColumns = await checkout.locator('.upi-qr-layout').evaluate(element => getComputedStyle(element).gridTemplateColumns);
+  expect(layoutColumns.split(' ').length).toBe(1);
+  const accessibility = await new AxeBuilder({ page })
+    .include('.upi-checkout-modal')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(accessibility.violations).toEqual([]);
+
+  await checkout.getByLabel('UPI UTR / reference number').fill('UPI12345678');
+  const submitResponse = page.waitForResponse(response =>
+    response.url().endsWith('/api/payments/upi/submit-reference') && response.request().method() === 'POST'
   );
-  await page.evaluate(() => window.__razorpayTestOptions.modal.ondismiss());
-  expect((await cancellation).status()).toBe(200);
-  await expect(page.getByText('Checkout closed. No payment was confirmed; you can retry from the listing.')).toBeVisible();
-
+  await checkout.getByRole('button', { name: 'Submit payment reference' }).click();
+  expect((await submitResponse).status()).toBe(202);
+  await expect(checkout.getByRole('status')).toContainText('order remains unpaid');
   const token = await page.evaluate(() => localStorage.getItem('tide_token'));
   const headers = { Authorization: `Bearer ${token}` };
-  const ordersAfterCancellation = await page.context().request.get(`${apiBase}/orders`, { headers });
-  expect(ordersAfterCancellation.status()).toBe(200);
-  const cancelledOrder = (await ordersAfterCancellation.json()).find(order => order.orderNumber === cancelledPayment.orderNumber);
-  expect(cancelledOrder.paymentStatus).toBe('failed');
-  expect(cancelledOrder.orderStatus).toBe('payment-failed');
-  const availableListings = await page.context().request.get(`${apiBase}/listings`);
-  expect((await availableListings.json()).find(listing => listing.id === 'fixed-listing').status).toBe('available');
+  const pendingOrders = await page.context().request.get(`${e2eApiUrl}/orders`, { headers });
+  const pendingOrder = (await pendingOrders.json()).find(order => order.orderNumber === payment.orderNumber);
+  expect(pendingOrder.paymentStatus).toBe('pending');
+  expect(pendingOrder.orderStatus).not.toBe('processing');
+  const pendingStatus = await page.context().request.get(`${e2eApiUrl}/payments/upi/${payment.transactionId}/status`, { headers });
+  expect((await pendingStatus.json()).status).toBe('pending_verification');
 
-  await details.getByRole('button', { name: /Buy now ·/ }).click();
-  const retryCheckout = page.locator('.modal-backdrop .modal').last();
-  await retryCheckout.locator('textarea[name="address"]').fill('Test pickup, Udupi');
-  const retryResponse = page.waitForResponse(response =>
-    response.url().endsWith('/api/payments/razorpay/orders') && response.request().method() === 'POST'
-  );
-  await retryCheckout.getByRole('button', { name: 'Continue to payment' }).click();
-  const retryOrder = await retryResponse;
-  expect(retryOrder.status()).toBe(201);
-  const payment = await retryOrder.json();
-  await expect.poll(() => page.evaluate(() => window.__razorpayTestOptions?.order_id)).toBe(payment.gatewayOrderId);
+  const adminContext = await browser.newContext({ baseURL: e2eWebUrl });
+  const adminPage = await adminContext.newPage();
+  await adminPage.goto('/login');
+  const adminLoginForm = adminPage.locator('.auth-modal');
+  await adminLoginForm.locator('input[name="email"]').fill('admin@auction.test');
+  await adminLoginForm.locator('input[name="password"]').fill('auction-test-password');
+  await adminLoginForm.getByRole('button', { name: 'Log in' }).click();
+  await expect(adminPage.getByRole('heading', { name: 'Welcome, Admin.' })).toBeVisible();
+  await adminPage.goto('/admin/transactions');
+  const reviewLine = adminPage.locator('.upi-review-line').filter({ hasText: payment.orderNumber });
+  await expect(reviewLine).toContainText('UPI12345678');
+  adminPage.once('dialog', dialog => dialog.accept());
+  await reviewLine.getByRole('button', { name: 'Verify' }).click();
+  await expect(adminPage.getByText('No UPI payments awaiting verification.')).toBeVisible();
+  await adminContext.close();
 
-  const paymentId = `pay_${payment.gatewayOrderId}`;
-  const signature = createHmac('sha256', paymentSecret)
-    .update(`${payment.gatewayOrderId}|${paymentId}`)
-    .digest('hex');
-  const verification = page.waitForResponse(response =>
-    response.url().endsWith('/api/payments/razorpay/verify') && response.request().method() === 'POST'
-  );
-  await page.evaluate(({ paymentId, signature }) => window.__razorpayTestOptions.handler({
-    razorpay_order_id: window.__razorpayTestOptions.order_id,
-    razorpay_payment_id: paymentId,
-    razorpay_signature: signature
-  }), { paymentId, signature });
-  expect((await verification).status()).toBe(200);
-  await expect(page.getByText(`Payment confirmed. Order ${payment.orderNumber} is being processed.`)).toBeVisible();
-
-  const finalOrders = await page.context().request.get(`${apiBase}/orders`, { headers });
-  const paidOrder = (await finalOrders.json()).find(order => order.orderNumber === payment.orderNumber);
+  await expect(checkout.getByRole('status')).toContainText('Payment verified', { timeout: 15_000 });
+  const paidOrders = await page.context().request.get(`${e2eApiUrl}/orders`, { headers });
+  const paidOrder = (await paidOrders.json()).find(order => order.orderNumber === payment.orderNumber);
   expect(paidOrder.paymentStatus).toBe('paid');
   expect(paidOrder.orderStatus).toBe('processing');
-  const transactions = await page.context().request.get(`${apiBase}/transactions`, { headers });
-  expect(transactions.status()).toBe(200);
-  expect((await transactions.json()).some(item => item.id === payment.transactionId && item.status === 'paid')).toBe(true);
+  const transactions = await page.context().request.get(`${e2eApiUrl}/transactions`, { headers });
+  expect((await transactions.json()).some(item => item.id === payment.transactionId && item.status === 'paid' && item.upiUtr === 'UPI12345678')).toBe(true);
 });

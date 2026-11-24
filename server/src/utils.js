@@ -114,7 +114,7 @@ export async function refreshAuction(auction) {
           buyer: updated.winner,
           fisherman: listing.fisherman,
           quantity,
-          amount: winningPrice * quantity,
+          amount: Number((winningPrice * quantity).toFixed(2)),
           paymentStatus: 'pending',
           orderStatus: 'awaiting-checkout',
           purchaseType: 'auction',

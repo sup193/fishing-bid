@@ -49,7 +49,7 @@ const fields = Object.freeze({
   auctions: ['listing', 'startPrice', 'currentPrice', 'minimumIncrement', 'currentBidder', 'bidCount', 'startTime', 'endTime', 'status', 'winner', 'winningBid', 'result', 'closedAt', 'closingNoticeSentAt', 'closureNotificationsSent', 'cancelledBy', 'order', 'bidderOffers', 'autoBids', 'bidHistory', 'processedRequests', 'offerSequence', 'demo'],
   bids: ['auction', 'buyer', 'amount', 'type', 'riskReviewNeeded', 'riskFlags', 'demo'],
   orders: ['orderNumber', 'auction', 'listing', 'buyer', 'fisherman', 'quantity', 'amount', 'paymentStatus', 'orderStatus', 'purchaseType', 'paymentMethod', 'gateway', 'gatewayOrderId', 'transactionRef', 'address', 'expectedDeliveryAt', 'deliveredAt', 'paidAt', 'cancellationActor', 'demo'],
-  payments: ['order', 'orderNumber', 'buyer', 'fisherman', 'listing', 'amount', 'currency', 'gateway', 'status', 'mode', 'gatewayOrderId', 'gatewayPaymentId', 'paymentMethod', 'failureReason', 'paidAt', 'demo'],
+  payments: ['order', 'orderNumber', 'buyer', 'fisherman', 'listing', 'amount', 'currency', 'gateway', 'status', 'mode', 'gatewayOrderId', 'gatewayPaymentId', 'paymentMethod', 'failureReason', 'paidAt', 'upiRecipientId', 'upiPaymentReference', 'upiUtr', 'referenceSubmittedAt', 'verificationStatus', 'verifiedBy', 'verifiedAt', 'rejectionReason', 'demo'],
   notifications: ['user', 'auction', 'bid', 'type', 'title', 'message', 'read'],
   reviews: ['order', 'fisherman', 'buyer', 'listing', 'rating', 'comment', 'status', 'moderationNote', 'moderatedBy', 'moderatedAt'],
   disputes: ['order', 'fisherman', 'buyer', 'listing', 'complaint', 'status', 'finding', 'adminNote', 'reviewedBy', 'reviewedAt'],
@@ -831,7 +831,7 @@ export async function createBuyoutOrder({ listing, buyerId, address }) {
         buyer: buyerId,
         fisherman: listing.fisherman,
         quantity: Number(listing.quantity),
-        amount: Number(listing.salePrice || listing.expectedPrice) * Number(listing.quantity),
+        amount: Number((Number(listing.salePrice || listing.expectedPrice) * Number(listing.quantity)).toFixed(2)),
         paymentStatus: 'pending',
         orderStatus: 'awaiting-payment',
         purchaseType: 'buyout',
@@ -854,6 +854,214 @@ export async function createBuyoutOrder({ listing, buyerId, address }) {
     throw error;
   }
   return normalizeRow(data);
+}
+
+export async function createUpiPaymentAttempt({ orderId, buyerId, paymentId, upiPaymentReference, upiRecipientId, now }) {
+  const timestamp = new Date(now).toISOString();
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const order = store.orders?.[orderId];
+    if (!order || order.buyer !== buyerId) return { status: 'not_found' };
+    if (order.paymentStatus === 'paid') return { status: 'already_paid' };
+    if (!['pending', 'failed'].includes(order.paymentStatus || 'pending')) return { status: 'ineligible' };
+    const amount = Number(order.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(Math.round(amount * 100))
+      || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-7) return { status: 'invalid_amount' };
+    if (order.purchaseType === 'buyout') {
+      const listing = store.listings?.[order.listing];
+      if (!listing || listing.status !== 'reserved' || listing.reservedBy !== buyerId) return { status: 'ineligible' };
+    } else if (order.auction) {
+      const auction = store.auctions?.[order.auction];
+      if (!auction || auction.status !== 'completed' || auction.winner !== buyerId) return { status: 'ineligible' };
+    } else {
+      return { status: 'ineligible' };
+    }
+
+    const payments = Object.entries(store.payments || {}).map(([id, payment]) => ({ id, ...payment }));
+    const activeUpi = payments.find(payment => payment.order === orderId
+      && payment.gateway === 'upi' && ['pending', 'pending_verification'].includes(payment.status));
+    if (activeUpi) return { status: 'existing', payment: activeUpi, order: { id: orderId, ...order } };
+    if (payments.some(payment => payment.order === orderId
+      && payment.gateway !== 'upi' && ['creating', 'pending'].includes(payment.status))) {
+      return { status: 'active_other_payment' };
+    }
+    const timestamped = {
+      order: orderId,
+      orderNumber: order.orderNumber,
+      buyer: order.buyer,
+      fisherman: order.fisherman,
+      listing: order.listing,
+      amount: Number(amount.toFixed(2)),
+      currency: 'INR',
+      gateway: 'upi',
+      status: 'pending',
+      mode: 'manual',
+      paymentMethod: 'upi_qr',
+      upiRecipientId,
+      upiPaymentReference,
+      verificationStatus: 'awaiting_payment',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      demo: Boolean(order.demo)
+    };
+    store.payments ??= {};
+    store.payments[paymentId] = timestamped;
+    store.orders[orderId] = {
+      ...order,
+      paymentStatus: 'pending',
+      orderStatus: 'awaiting-payment',
+      paymentMethod: 'upi_qr',
+      gateway: 'upi',
+      updatedAt: timestamp
+    };
+    writeLocalDb(store);
+    return { status: 'created', payment: { id: paymentId, ...timestamped }, order: { id: orderId, ...store.orders[orderId] } };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_create_upi_payment_attempt', {
+    p_payment_id: paymentId,
+    p_order_id: orderId,
+    p_buyer_id: buyerId,
+    p_upi_reference: upiPaymentReference,
+    p_upi_recipient: upiRecipientId,
+    p_now: timestamp
+  });
+  if (error) throw error;
+  return {
+    ...data,
+    payment: normalizeRow(data?.payment),
+    order: normalizeRow(data?.order)
+  };
+}
+
+export async function submitUpiPaymentReference({ transactionId, buyerId, utr, now }) {
+  const timestamp = new Date(now).toISOString();
+  const normalizedUtr = String(utr).trim().toUpperCase();
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const payment = store.payments?.[transactionId];
+    if (!payment || payment.buyer !== buyerId) return { status: 'not_found' };
+    if (payment.gateway !== 'upi' || payment.status !== 'pending') return { status: 'invalid_status' };
+    const duplicate = Object.entries(store.payments || {}).some(([id, item]) =>
+      id !== transactionId && String(item.upiUtr || '').trim().toUpperCase() === normalizedUtr);
+    if (duplicate) return { status: 'duplicate_reference' };
+    const orderId = payment.order;
+    const order = store.orders?.[orderId];
+    if (!order || order.buyer !== buyerId || Number(order.amount) !== Number(payment.amount)
+      || order.paymentStatus === 'paid') return { status: 'ineligible' };
+    const saved = {
+      ...payment,
+      status: 'pending_verification',
+      upiUtr: normalizedUtr,
+      referenceSubmittedAt: timestamp,
+      verificationStatus: 'pending',
+      updatedAt: timestamp
+    };
+    store.payments[transactionId] = saved;
+    writeLocalDb(store);
+    return { status: 'submitted', payment: { id: transactionId, ...saved } };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_submit_upi_reference', {
+    p_payment_id: transactionId,
+    p_buyer_id: buyerId,
+    p_utr: normalizedUtr,
+    p_now: timestamp
+  });
+  if (error) throw error;
+  return { ...data, payment: normalizeRow(data?.payment) };
+}
+
+export async function reviewUpiPayment({ transactionId, action, adminId, reason, now }) {
+  const timestamp = new Date(now).toISOString();
+  const rejectionReason = String(reason || '').trim().slice(0, 300);
+  if (isLocalDatabase()) {
+    const store = readLocalDb();
+    const payment = store.payments?.[transactionId];
+    if (!payment || payment.gateway !== 'upi') return { status: 'not_found' };
+    if (payment.status !== 'pending_verification' || payment.verificationStatus !== 'pending') return { status: 'already_reviewed' };
+    const orderId = payment.order;
+    const order = store.orders?.[orderId];
+    if (!order || order.buyer !== payment.buyer || Number(order.amount) !== Number(payment.amount)) return { status: 'invalid_order' };
+    if (order.paymentStatus !== 'pending') return { status: 'invalid_order' };
+    if (action === 'reject') {
+      const updatedPayment = {
+        ...payment,
+        status: 'rejected',
+        verificationStatus: 'rejected',
+        verifiedBy: adminId,
+        verifiedAt: timestamp,
+        rejectionReason: rejectionReason || 'Payment reference could not be verified',
+        updatedAt: timestamp
+      };
+      store.payments[transactionId] = updatedPayment;
+      store.orders[orderId] = { ...order, paymentStatus: 'failed', orderStatus: 'payment-failed', updatedAt: timestamp };
+      if (order.listing && order.purchaseType === 'buyout') {
+        const listing = store.listings?.[order.listing];
+        if (listing?.status === 'reserved' && listing.reservedBy === order.buyer) {
+          store.listings[order.listing] = { ...listing, status: 'available', reservedBy: null, updatedAt: timestamp };
+        }
+      }
+      writeLocalDb(store);
+      return { status: 'rejected', payment: { id: transactionId, ...updatedPayment }, order: { id: orderId, ...store.orders[orderId] } };
+    }
+    if (action !== 'verify') return { status: 'invalid_action' };
+    if (!payment.upiUtr || Object.entries(store.payments || {}).some(([id, item]) =>
+      id !== transactionId && String(item.upiUtr || '').trim().toUpperCase() === String(payment.upiUtr).trim().toUpperCase())) {
+      return { status: 'duplicate_reference' };
+    }
+    if (order.paymentStatus !== 'pending') return { status: order.paymentStatus === 'paid' ? 'already_paid' : 'invalid_order' };
+    if (order.purchaseType === 'buyout') {
+      const listing = store.listings?.[order.listing];
+      if (!listing || listing.status !== 'reserved' || listing.reservedBy !== order.buyer) return { status: 'invalid_order' };
+    } else if (order.auction) {
+      const auction = store.auctions?.[order.auction];
+      if (!auction || auction.status !== 'completed' || auction.winner !== order.buyer) return { status: 'invalid_order' };
+    }
+    const updatedPayment = {
+      ...payment,
+      status: 'paid',
+      verificationStatus: 'verified',
+      verifiedBy: adminId,
+      verifiedAt: timestamp,
+      paidAt: timestamp,
+      updatedAt: timestamp
+    };
+    const updatedOrder = {
+      ...order,
+      paymentStatus: 'paid',
+      orderStatus: 'processing',
+      paymentMethod: 'upi_qr',
+      gateway: 'upi',
+      transactionRef: payment.upiUtr,
+      paidAt: timestamp,
+      updatedAt: timestamp
+    };
+    store.payments[transactionId] = updatedPayment;
+    store.orders[orderId] = updatedOrder;
+    if (order.listing) {
+      const listing = store.listings?.[order.listing];
+      if (listing) store.listings[order.listing] = { ...listing, status: 'sold', reservedBy: null, updatedAt: timestamp };
+    }
+    writeLocalDb(store);
+    return {
+      status: 'verified',
+      payment: { id: transactionId, ...updatedPayment },
+      order: { id: orderId, ...updatedOrder },
+      fishermanId: order.fisherman
+    };
+  }
+  const { data, error } = await initSupabase().rpc('tidemarket_review_upi_payment', {
+    p_payment_id: transactionId,
+    p_action: action,
+    p_admin_id: adminId,
+    p_rejection_reason: rejectionReason,
+    p_now: timestamp
+  });
+  if (error) throw error;
+  return {
+    ...data,
+    payment: normalizeRow(data?.payment),
+    order: normalizeRow(data?.order)
+  };
 }
 
 export async function markPaymentPaid(transaction, payment, paidAt) {

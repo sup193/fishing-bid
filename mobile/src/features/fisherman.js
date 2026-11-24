@@ -19,6 +19,10 @@ const blankListing = {
   imageUrl: '',
   storagePath: ''
 };
+const hasVerifiedPayment = order => order.verifiedPayment === true
+  || (order.paymentStatus === 'paid'
+    && (order.gateway === 'razorpay' || (order.gateway === 'upi' && order.paymentMethod === 'upi_qr'))
+    && Boolean(order.transactionRef));
 
 export function FishermanInventoryScreen() {
   const [listings, setListings] = useState([]);
@@ -522,7 +526,7 @@ export function FishermanOrdersScreen() {
             <Text style={styles.orderTitle}>{order.listingDetails?.fishType || 'Fish order'} · {money(order.amount)}</Text>
             <Text style={styles.orderMeta}>Order {order.orderNumber || order.id} · {order.quantity || order.listingDetails?.quantity || 0} kg</Text>
             <Text style={styles.orderMeta}>Payment {order.paymentStatus || 'pending'} · Order {order.orderStatus || 'pending'}</Text>
-            {order.paymentStatus === 'paid' && order.gateway === 'razorpay' && order.transactionRef && !['completed', 'cancelled'].includes(order.orderStatus)
+            {hasVerifiedPayment(order) && !['completed', 'cancelled'].includes(order.orderStatus)
               ? <>
                 <Field label="Expected delivery (YYYY-MM-DD)" value={deliveryDates[order.id] ?? order.expectedDeliveryAt?.slice(0, 10) ?? ''} onChangeText={value => setDeliveryDates(current => ({ ...current, [order.id]: value }))} placeholder="e.g. 2026-07-14" autoCapitalize="none" />
                 <Button label="Save expected delivery" variant="secondary" compact onPress={() => saveDeliveryDate(order)} loading={updating === order.id} />
@@ -556,14 +560,14 @@ export function FishermanSalesScreen() {
 
   useEffect(() => { Promise.resolve().then(load); }, [load]);
 
-  const paidOrders = useMemo(() => orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay'), [orders]);
+  const paidOrders = useMemo(() => orders.filter(hasVerifiedPayment), [orders]);
   const total = paidOrders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
 
   return (
     <Page title="Selling data" subtitle="Only verified paid orders count toward completed sales." onRefresh={() => { setRefreshing(true); load(); }} refreshing={refreshing}>
       <Stat label="Verified sales" value={money(total)} note={`${paidOrders.length} paid orders`} />
       {error ? <Notice>{error}</Notice> : null}
-      {loading ? <Loading label="Loading sales…" /> : !paidOrders.length ? <Empty>Verified Razorpay sales will appear here after buyer checkout.</Empty> : paidOrders.map(order => (
+      {loading ? <Loading label="Loading sales…" /> : !paidOrders.length ? <Empty>Verified UPI and Razorpay sales will appear here after payment review.</Empty> : paidOrders.map(order => (
         <Card key={order.id}>
           <Text style={styles.orderTitle}>{order.listingDetails?.fishType || 'Fish order'} · {money(order.amount)}</Text>
           <Text style={styles.orderMeta}>Order {order.orderNumber || order.id} · {order.quantity || 0} kg</Text>

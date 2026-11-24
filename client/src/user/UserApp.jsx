@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowUpRight, BadgeCheck, BarChart3, Bell, CircleDollarSign, Clock3, Gavel, Heart, History, MapPin, MessageCircle, ReceiptText, Search, ShoppingBag, Sparkles, Trophy, Waves } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import TransactionHistory from '../TransactionHistory.jsx';
@@ -230,7 +231,7 @@ function MarketTrendChart({ data, loading, error, days, onDaysChange, fishType, 
         </svg>
       </div>
       <div className="market-trend-legend">{sources.map(source => <span key={source.key}><i style={{ backgroundColor: source.color }} />{source.label}</span>)}</div>
-      <p className="market-trend-footnote">Auction bars show each listing’s latest observed auction price (the starting bid until the first bid); fixed-price bars show listed prices. Paid-sale bars use verified Razorpay orders divided by order quantity. All prices are per kg.</p>
+      <p className="market-trend-footnote">Auction bars show each listing’s latest observed auction price (the starting bid until the first bid); fixed-price bars show listed prices. Paid-sale bars use verified Razorpay and UPI orders divided by order quantity. All prices are per kg.</p>
     </>}
   </section>;
 }
@@ -649,91 +650,17 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
 
   const startPayment = async form => {
     if (!user) return onAuth('login');
-    let payment;
-    try {
-      payment = await api.createPayment({
-        ...(checkout.type === 'auction' ? { auctionId: selected.auction.id } : { listingId: selected.id }),
-        address: form.address
-      });
-      setTransactionRefresh(value => value + 1);
-
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      await new Promise((resolve, reject) => {
-        if (window.Razorpay) return resolve();
-        script.onload = resolve;
-        script.onerror = () => reject(new Error('Could not load Razorpay Checkout. Check your internet connection and try again.'));
-        document.body.appendChild(script);
-      });
-      const checkoutOptions = {
-        key: payment.keyId,
-        amount: payment.amount,
-        currency: payment.currency,
-        name: payment.name,
-        description: payment.description,
-        order_id: payment.gatewayOrderId,
-        prefill: { name: user.name, email: user.email },
-        theme: { color: '#f47a58' },
-        handler: async result => {
-          try {
-            await api.verifyPayment({ transactionId: payment.transactionId, ...result });
-            setTransactionRefresh(value => value + 1);
-            setMessageType('success');
-            setMessage(`Payment confirmed. Order ${payment.orderNumber} is being processed.`);
-            setCheckout(null);
-            closeListing();
-          } catch (error) {
-            setTransactionRefresh(value => value + 1);
-            setMessageType('error');
-            setMessage(error.message);
-          }
-        },
-        modal: {
-          ondismiss: async () => {
-            try {
-              await api.recordPaymentFailure({ transactionId: payment.transactionId, reason: 'Checkout was closed before payment completed' });
-              setTransactionRefresh(value => value + 1);
-              setMessageType('error');
-              setMessage('Checkout closed. No payment was confirmed; you can retry from the listing.');
-            } catch (error) {
-              setMessageType('error');
-              setMessage(error.message);
-            }
-          }
-        }
-      };
-      const razorpay = new window.Razorpay(checkoutOptions);
-      razorpay.on('payment.failed', async event => {
-        try {
-          await api.recordPaymentFailure({
-            transactionId: payment.transactionId,
-            reason: event.error?.description || 'Payment was not completed'
-          });
-          setTransactionRefresh(value => value + 1);
-          setMessageType('error');
-          setMessage(event.error?.description || 'Payment was not completed. You can retry checkout.');
-        } catch (error) {
-          setMessageType('error');
-          setMessage(error.message);
-        }
-      });
-      setCheckout(null);
-      razorpay.open();
-    } catch (error) {
-      let displayError = error.message;
-      if (payment?.transactionId) {
-        try {
-          await api.recordPaymentFailure({ transactionId: payment.transactionId, reason: 'Checkout could not be opened' });
-        } catch (recordError) {
-          displayError = `${displayError} Payment history update failed: ${recordError.message}`;
-        }
-      }
-      setTransactionRefresh(value => value + 1);
-      setMessageType('error');
-      setMessage(displayError);
-      throw new Error(displayError);
-    }
+    const payment = await api.createPayment({
+      ...(checkout.type === 'auction' ? { auctionId: selected.auction.id } : { listingId: selected.id }),
+      address: form.address
+    });
+    setTransactionRefresh(value => value + 1);
+    return payment;
+  };
+  const submitUpiReference = async (transactionId, utr) => {
+    const result = await api.submitUpiReference({ transactionId, utr });
+    setTransactionRefresh(value => value + 1);
+    return result;
   };
 
   const bidClosed = selected?.saleMode === 'bid' && (selected?.auction?.status === 'completed' || (selected?.auction?.endTime && new Date(selected.auction.endTime).getTime() <= now));
@@ -1096,37 +1023,134 @@ export default function UserApp({ user, onAuth, view = 'market' }) {
         {message && <p className={messageType === 'success' ? 'success-notice' : 'notice'} role="status">{message}</p>}
       </section>
     </main>}
-    {checkout && <CheckoutForm type={checkout.type} onClose={() => setCheckout(null)} onSubmit={startPayment} />}
+    {checkout && <CheckoutForm type={checkout.type} onClose={() => setCheckout(null)} onSubmit={startPayment} onSubmitReference={submitUpiReference} onStatusChange={() => setTransactionRefresh(value => value + 1)} />}
   </div>;
 }
 
-function CheckoutForm({ type, onClose, onSubmit }) {
+function CheckoutForm({ type, onClose, onSubmit, onSubmitReference, onStatusChange }) {
   const dialogRef = useRef(null);
+  const onStatusChangeRef = useRef(onStatusChange);
   const [address, setAddress] = useState('');
+  const [payment, setPayment] = useState(null);
+  const [utr, setUtr] = useState('');
   const [error, setError] = useState('');
+  const [copyMessage, setCopyMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [submittingReference, setSubmittingReference] = useState(false);
+  onStatusChangeRef.current = onStatusChange;
   useDialogAccessibility({ open: true, dialogRef, onClose, focusKey: type });
+  useEffect(() => {
+    if (!payment || payment.status !== 'pending_verification') return undefined;
+    let active = true;
+    const refreshStatus = async () => {
+      try {
+        const status = await api.upiPaymentStatus(payment.transactionId);
+        if (!active) return;
+        setPayment(current => {
+          if (!current) return current;
+          if (current.status === status.status && current.verificationStatus === status.verificationStatus
+            && current.rejectionReason === status.rejectionReason && current.paidAt === status.paidAt) return current;
+          return { ...current, ...status };
+        });
+        if (['paid', 'rejected'].includes(status.status)) onStatusChangeRef.current?.();
+      } catch {
+        if (active) setError('Could not refresh payment status. Your submitted reference is still recorded.');
+      }
+    };
+    const interval = window.setInterval(refreshStatus, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [payment?.transactionId, payment?.status]);
   const submit = async event => {
     event.preventDefault();
     setLoading(true);
     try {
-      await onSubmit({ address });
+      setPayment(await onSubmit({ address }));
+      setError('');
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
+  const submitReference = async event => {
+    event.preventDefault();
+    setSubmittingReference(true);
+    setError('');
+    try {
+      const result = await onSubmitReference(payment.transactionId, utr);
+      setPayment(current => ({
+        ...current,
+        status: result.status,
+        verificationStatus: result.verificationStatus,
+        referenceSubmittedAt: result.referenceSubmittedAt,
+        upiUtr: utr.trim().toUpperCase()
+      }));
+      setUtr('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmittingReference(false);
+    }
+  };
+  const copyValue = async (value, label) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyMessage(`${label} copied.`);
+    } catch {
+      setCopyMessage(`Could not copy ${label.toLowerCase()}. Select and copy it manually.`);
+    }
+  };
+  const currencyAmount = payment
+    ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(Number(payment.amount))
+    : '';
   return <div className="modal-backdrop" onClick={onClose}>
-    <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title" onClick={event => event.stopPropagation()}>
+    <div ref={dialogRef} className={`modal ${payment ? 'upi-checkout-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="checkout-title" onClick={event => event.stopPropagation()}>
       <button className="close" type="button" aria-label="Close checkout" onClick={onClose}>×</button>
       <p className="kicker">{type === 'buyout' ? 'BUYOUT ORDER' : 'AUCTION CHECKOUT'}</p>
-      <h2 id="checkout-title">Pay securely with Razorpay.</h2>
-      <form onSubmit={submit}>
-        <textarea name="address" aria-label="Delivery or pickup address" data-dialog-autofocus="true" placeholder="Delivery or pickup address" value={address} onChange={event => setAddress(event.target.value)} rows="3" required />
-        {error && <p className="form-error">{error}</p>}
-        <button className="button primary full" type="submit" disabled={loading}>{loading ? 'Preparing secure checkout…' : 'Continue to payment'}</button>
-      </form>
+      <h2 id="checkout-title">{payment ? 'Pay by UPI QR' : 'Prepare your UPI payment.'}</h2>
+      {!payment ? <form onSubmit={submit}>
+        <label htmlFor="checkout-address">Delivery or pickup address</label>
+        <textarea id="checkout-address" name="address" aria-label="Delivery or pickup address" data-dialog-autofocus="true" placeholder="Delivery or pickup address" value={address} onChange={event => setAddress(event.target.value)} rows="3" required />
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="button primary full" type="submit" disabled={loading}>{loading ? 'Preparing payment…' : 'Continue to payment'}</button>
+      </form> : <div className="upi-payment-details">
+        <div className="upi-payment-summary">
+          <strong>{currencyAmount}</strong>
+          <span>Exact bill amount · Order {payment.orderNumber}</span>
+        </div>
+        {payment.status === 'paid' ? <p className="success-notice" role="status">Payment verified. Your order is being processed.</p>
+          : payment.status === 'rejected' ? <p className="notice" role="alert">This payment reference was rejected. {payment.rejectionReason || 'Please contact support or retry from the listing.'}</p>
+            : payment.status === 'pending_verification' ? <p className="upi-pending" role="status">Your reference has been submitted. The order remains unpaid while an administrator verifies the payment.</p>
+              : <div className="upi-qr-layout">
+                <div className="upi-qr-code" role="img" aria-label={`UPI payment QR for order ${payment.orderNumber}, amount ${currencyAmount}`}>
+                  <QRCodeSVG value={payment.paymentUri} size={220} level="M" title={`Pay ${currencyAmount} for order ${payment.orderNumber}`} />
+                </div>
+                <div className="upi-payment-info">
+                  <p><span>Pay to</span><strong>{payment.upiRecipientId}</strong></p>
+                  <p><span>Payment reference</span><strong>{payment.upiPaymentReference}</strong></p>
+                  <div className="upi-copy-actions">
+                    <button className="button secondary small" type="button" onClick={() => copyValue(payment.upiRecipientId, 'UPI ID')}>Copy UPI ID</button>
+                    <button className="button secondary small" type="button" onClick={() => copyValue(payment.upiPaymentReference, 'Payment reference')}>Copy payment reference</button>
+                  </div>
+                  <a className="button primary full" href={payment.paymentUri}>Open UPI application</a>
+                </div>
+              </div>}
+        {payment.status === 'pending' && <>
+          <p className="upi-instructions">Scan the QR code or open your UPI app and pay the exact amount shown. After payment, enter the UTR/reference from your payment receipt. Generating a QR code is not proof of payment.</p>
+          <form className="upi-reference-form" onSubmit={submitReference}>
+            <label htmlFor="upi-utr">UPI UTR / reference number</label>
+            <input id="upi-utr" name="utr" autoComplete="off" minLength={6} maxLength={40} pattern="[A-Za-z0-9]{6,40}" value={utr} onChange={event => setUtr(event.target.value)} required />
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <button className="button primary full" type="submit" disabled={submittingReference}>{submittingReference ? 'Submitting reference…' : 'Submit payment reference'}</button>
+          </form>
+        </>}
+        {copyMessage && <p className="form-hint" role="status">{copyMessage}</p>}
+        {error && payment.status !== 'pending' && <p className="form-error" role="alert">{error}</p>}
+        <button className="button secondary full" type="button" onClick={onClose}>Close</button>
+      </div>}
     </div>
   </div>;
 }

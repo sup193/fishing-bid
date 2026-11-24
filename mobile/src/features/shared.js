@@ -3,6 +3,15 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Card, Empty, Loading, Notice, Page, colors, money } from '../components/common';
 import { mobileApi } from '../../api';
 
+const paymentStatusLabel = status => ({
+  creating: 'Awaiting payment',
+  pending: 'Awaiting payment',
+  pending_verification: 'Pending verification',
+  paid: 'Paid',
+  rejected: 'Rejected',
+  failed: 'Failed'
+}[status] || status || 'Awaiting payment');
+
 export function TransactionsScreen() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,9 +38,10 @@ export function TransactionsScreen() {
       {loading ? <Loading label="Loading transactions…" /> : !transactions.length ? <Empty>No payment transactions yet.</Empty> : transactions.map(item => (
         <Card key={item.id}>
           <TextRow label={item.fishType || 'Fish order'} value={money(item.amount)} strong />
-          <TextRow label={`Order ${item.orderNumber || item.order || item.id}`} value={item.status || 'pending'} />
-          <TextRow label={`${item.quantity || 0} kg · ${item.orderStatus || 'order pending'}`} value={formatDate(item.createdAt)} />
-          {item.gateway ? <TextRow label="Payment gateway" value={item.gateway} /> : null}
+          <TextRow label={`Order ${item.orderNumber || item.order || item.id}`} value={paymentStatusLabel(item.status)} />
+          <TextRow label="Payment method" value={item.paymentMethod === 'upi_qr' ? 'UPI QR' : item.gateway || item.paymentMethod || 'Payment'} />
+          {item.upiUtr ? <TextRow label="UPI UTR/reference" value={item.upiUtr} /> : null}
+          <TextRow label={`${item.quantity || 0} kg · ${item.orderStatus || 'order pending'}`} value={formatDate(item.referenceSubmittedAt || item.paidAt || item.createdAt)} />
         </Card>
       ))}
     </Page>

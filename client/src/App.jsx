@@ -11,18 +11,16 @@ export default function App() {
   const [user, setUser] = useState(() => localStorage.getItem('tide_token')
     ? JSON.parse(localStorage.getItem('tide_user') || 'null')
     : null);
-  const [authMode, setAuthMode] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(() => Boolean(localStorage.getItem('tide_token')));
   const [menu, setMenu] = useState(false);
   const menuButtonRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (location.pathname === '/login') setAuthMode('login');
-    else if (location.pathname === '/register') setAuthMode('register');
-    else setAuthMode(null);
-  }, [location.pathname]);
+  const authMode = location.pathname === '/login'
+    ? 'login'
+    : location.pathname === '/register'
+      ? 'register'
+      : null;
   useEffect(() => setMenu(false), [location.pathname]);
   useEffect(() => {
     if (!menu) return undefined;
@@ -45,7 +43,6 @@ export default function App() {
     localStorage.setItem('tide_token', result.token);
     localStorage.setItem('tide_user', JSON.stringify(result.user));
     setUser(result.user);
-    setAuthMode(null);
     navigate('/dashboard', { replace: true });
   };
   useEffect(() => {

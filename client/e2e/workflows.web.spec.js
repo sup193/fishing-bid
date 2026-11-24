@@ -196,6 +196,7 @@ test('buyers activate after OTP while fisherman registrations require admin appr
   expect(await page.evaluate(() => localStorage.getItem('tide_token'))).toBeNull();
   await fishermanSignup.getByRole('button', { name: 'Go to login' }).click();
   const pendingLogin = page.locator('.auth-modal');
+  await expect(pendingLogin.getByRole('heading', { name: 'Welcome back to the water.' })).toBeVisible();
   await pendingLogin.locator('input[name="email"]').fill(fishermanEmail);
   await pendingLogin.locator('input[name="password"]').fill('audit-fisherman-password');
   await pendingLogin.getByRole('button', { name: 'Log in' }).click();

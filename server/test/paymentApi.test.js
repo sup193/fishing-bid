@@ -60,6 +60,16 @@ async function createPayment(token, listingId) {
   return data;
 }
 
+async function createUpiPayment(token, body) {
+  const { response, data } = await api('/payments/upi/orders', {
+    token,
+    method: 'POST',
+    body
+  });
+  assert.ok([200, 201].includes(response.status), JSON.stringify(data));
+  return data;
+}
+
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidemarket-payment-api-test-'));
   databasePath = path.join(tempDir, 'local-db.json');
@@ -76,6 +86,16 @@ before(async () => {
   database.listings['payment-invalid'] = { ...database.listings['fixed-listing'], fisherman: 'fisherman-1' };
   database.listings['payment-webhook'] = { ...database.listings['fixed-listing'], fisherman: 'fisherman-1' };
   database.listings['payment-cancelled'] = { ...database.listings['fixed-listing'], fisherman: 'fisherman-1' };
+  database.listings['upi-fixed'] = { ...database.listings['fixed-listing'], quantity: 3, salePrice: 500, status: 'available' };
+  database.listings['upi-second'] = { ...database.listings['fixed-listing'], quantity: 4, salePrice: 400, status: 'available' };
+  database.listings['upi-auction-listing'] = { ...database.listings['listing-auction-settled'], status: 'auction' };
+  database.auctions['upi-auction'] = { ...database.auctions['auction-settled'], listing: 'upi-auction-listing' };
+  database.users['admin-1'] = {
+    ...database.users['buyer-1'],
+    name: 'Test Admin',
+    email: 'admin@auction.test',
+    role: 'admin'
+  };
   fs.writeFileSync(databasePath, JSON.stringify(database, null, 2));
 
   originalFetch = globalThis.fetch;
@@ -287,4 +307,174 @@ test('webhook HMAC and captured payment data are checked and duplicate events ar
   assert.equal(order.transactionRef, 'pay_webhook');
   assert.equal(payment.status, 'paid');
   assert.equal(Object.values(database.orders).filter(item => item.listing === 'payment-webhook').length, 1);
+});
+
+test('UPI checkout uses the server-calculated fixed-price amount and a unique payment reference', async () => {
+  const token = await login('buyer-1@auction.test');
+  const payment = await createUpiPayment(token, { listingId: 'upi-fixed', amount: 0.01 });
+  assert.equal(payment.amount, 1500);
+  assert.equal(payment.upiRecipientId, 'itssupriyak1@okaxis');
+  const uri = new URL(payment.paymentUri.replace('upi://pay?', 'https://upi.invalid/?'));
+  assert.equal(uri.searchParams.get('pa'), 'itssupriyak1@okaxis');
+  assert.equal(uri.searchParams.get('am'), '1500.00');
+  assert.equal(uri.searchParams.get('cu'), 'INR');
+  assert.equal(uri.searchParams.get('tn'), payment.orderNumber);
+  assert.equal(uri.searchParams.get('tr'), payment.upiPaymentReference);
+  assert.equal(payment.status, 'pending');
+  assert.ok(payment.transactionId);
+  const duplicateAttempt = await api('/payments/upi/orders', {
+    token,
+    method: 'POST',
+    body: { listingId: 'upi-fixed' }
+  });
+  assert.equal(duplicateAttempt.response.status, 200);
+  assert.equal(duplicateAttempt.data.transactionId, payment.transactionId);
+});
+
+test('UPI checkout supports the winning auction order and exact winning bill', async () => {
+  const token = await login('buyer-1@auction.test');
+  const payment = await createUpiPayment(token, { auctionId: 'upi-auction', amount: 1 });
+  assert.equal(payment.amount, 8400);
+  const uri = new URL(payment.paymentUri.replace('upi://pay?', 'https://upi.invalid/?'));
+  assert.equal(uri.searchParams.get('pa'), 'itssupriyak1@okaxis');
+  assert.equal(uri.searchParams.get('am'), '8400.00');
+  assert.equal(uri.searchParams.get('tr'), payment.upiPaymentReference);
+});
+
+test('UPI references remain pending until admin approval and duplicate references are rejected', async () => {
+  const buyerToken = await login('buyer-1@auction.test');
+  const otherBuyerToken = await login('buyer-2@auction.test');
+  const adminToken = await login('admin@auction.test');
+  const first = await createUpiPayment(buyerToken, { listingId: 'upi-fixed' });
+  const second = await createUpiPayment(otherBuyerToken, { listingId: 'upi-second' });
+
+  const buyerOrder = (await api('/orders', { token: otherBuyerToken })).data
+    .find(order => order.orderNumber === second.orderNumber);
+  const wrongOwnerOrder = await api('/payments/upi/orders', {
+    token: buyerToken,
+    method: 'POST',
+    body: { orderId: buyerOrder.id, amount: 1 }
+  });
+  assert.equal(wrongOwnerOrder.response.status, 404);
+  const wrongOwnerReference = await api('/payments/upi/submit-reference', {
+    token: otherBuyerToken,
+    method: 'POST',
+    body: { transactionId: first.transactionId, utr: 'UPI12345678' }
+  });
+  assert.equal(wrongOwnerReference.response.status, 404);
+
+  const invalidUtr = await api('/payments/upi/submit-reference', {
+    token: buyerToken,
+    method: 'POST',
+    body: { transactionId: first.transactionId, utr: '123' }
+  });
+  assert.equal(invalidUtr.response.status, 400);
+  const submitted = await api('/payments/upi/submit-reference', {
+    token: buyerToken,
+    method: 'POST',
+    body: { transactionId: first.transactionId, utr: 'UPI12345678' }
+  });
+  assert.equal(submitted.response.status, 202);
+  assert.equal(submitted.data.status, 'pending_verification');
+
+  let database = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
+  const firstOrder = database.orders[database.payments[first.transactionId].order];
+  assert.equal(database.payments[first.transactionId].status, 'pending_verification');
+  assert.equal(firstOrder.paymentStatus, 'pending');
+  assert.notEqual(firstOrder.orderStatus, 'processing');
+  assert.equal(database.listings['upi-fixed'].status, 'reserved');
+
+  const duplicateUtr = await api('/payments/upi/submit-reference', {
+    token: otherBuyerToken,
+    method: 'POST',
+    body: { transactionId: second.transactionId, utr: 'upi12345678' }
+  });
+  assert.equal(duplicateUtr.response.status, 409);
+
+  const buyerAdminQueue = await api('/admin/payments/pending', { token: buyerToken });
+  assert.equal(buyerAdminQueue.response.status, 403);
+  const adminQueue = await api('/admin/payments/pending', { token: adminToken });
+  assert.equal(adminQueue.response.status, 200);
+  assert.deepEqual(adminQueue.data.map(item => item.id), [first.transactionId]);
+  assert.equal(adminQueue.data[0].buyer.name, 'Test Buyer 1');
+  assert.equal(adminQueue.data[0].fisherman.name, 'Test Fisherman');
+  assert.equal(adminQueue.data[0].fishType, 'Prawns');
+  const buyerRejection = await api(`/admin/payments/${first.transactionId}/reject`, {
+    token: buyerToken,
+    method: 'PATCH'
+  });
+  assert.equal(buyerRejection.response.status, 403);
+  const buyerStatus = await api(`/payments/upi/${first.transactionId}/status`, { token: buyerToken });
+  assert.equal(buyerStatus.response.status, 200);
+  assert.equal(buyerStatus.data.status, 'pending_verification');
+  const priorReputation = await api('/admin/fishermen/fisherman-1', { token: adminToken });
+  assert.equal(priorReputation.response.status, 200);
+
+  const buyerApproval = await api(`/admin/payments/${first.transactionId}/verify`, {
+    token: buyerToken,
+    method: 'PATCH'
+  });
+  assert.equal(buyerApproval.response.status, 403);
+  const approved = await api(`/admin/payments/${first.transactionId}/verify`, {
+    token: adminToken,
+    method: 'PATCH'
+  });
+  assert.equal(approved.response.status, 200);
+  const duplicateApproval = await api(`/admin/payments/${first.transactionId}/verify`, {
+    token: adminToken,
+    method: 'PATCH'
+  });
+  assert.equal(duplicateApproval.response.status, 409);
+
+  database = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
+  const paidOrder = database.orders[database.payments[first.transactionId].order];
+  assert.equal(database.payments[first.transactionId].status, 'paid');
+  assert.equal(database.payments[first.transactionId].verificationStatus, 'verified');
+  assert.equal(database.payments[first.transactionId].verifiedBy, 'admin-1');
+  assert.equal(paidOrder.paymentStatus, 'paid');
+  assert.equal(paidOrder.orderStatus, 'processing');
+  assert.equal(paidOrder.transactionRef, 'UPI12345678');
+  assert.equal(database.listings['upi-fixed'].status, 'sold');
+  const updatedReputation = await api('/admin/fishermen/fisherman-1', { token: adminToken });
+  assert.equal(updatedReputation.response.status, 200);
+  assert.equal(updatedReputation.data.reputation.verifiedOrderCount, priorReputation.data.reputation.verifiedOrderCount + 1);
+  const fishermanToken = await login('fisherman@auction.test');
+  const fishermanTransactions = await api('/transactions', { token: fishermanToken });
+  const fishermanPayment = fishermanTransactions.data.find(item => item.id === first.transactionId);
+  assert.ok(fishermanPayment);
+  assert.equal(Object.hasOwn(fishermanPayment, 'upiUtr'), false);
+  assert.equal(Object.hasOwn(fishermanPayment, 'upiRecipientId'), false);
+  assert.equal(Object.hasOwn(fishermanPayment, 'upiPaymentReference'), false);
+  const fishermanOrders = await api('/fisherman/sales', { token: fishermanToken });
+  const fishermanOrder = fishermanOrders.data.find(item => item.orderNumber === first.orderNumber);
+  assert.equal(fishermanOrder.verifiedPayment, true);
+  assert.equal(Object.hasOwn(fishermanOrder, 'transactionRef'), false);
+
+  const rejectedReference = await api('/payments/upi/submit-reference', {
+    token: otherBuyerToken,
+    method: 'POST',
+    body: { transactionId: second.transactionId, utr: 'UPI87654321' }
+  });
+  assert.equal(rejectedReference.response.status, 202);
+  const rejected = await api(`/admin/payments/${second.transactionId}/reject`, {
+    token: adminToken,
+    method: 'PATCH',
+    body: { reason: 'Receipt did not confirm the payment' }
+  });
+  assert.equal(rejected.response.status, 200);
+  const duplicateRejection = await api(`/admin/payments/${second.transactionId}/reject`, {
+    token: adminToken,
+    method: 'PATCH'
+  });
+  assert.equal(duplicateRejection.response.status, 409);
+  database = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
+  const unpaidOrder = database.orders[database.payments[second.transactionId].order];
+  assert.equal(database.payments[second.transactionId].status, 'rejected');
+  assert.equal(unpaidOrder.paymentStatus, 'failed');
+  assert.notEqual(unpaidOrder.paymentStatus, 'paid');
+  assert.equal(database.listings['upi-second'].status, 'available');
+
+  const history = await api('/transactions', { token: otherBuyerToken });
+  assert.equal(history.response.status, 200);
+  assert.equal(history.data.find(item => item.id === second.transactionId).status, 'rejected');
 });

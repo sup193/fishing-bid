@@ -1,6 +1,24 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const apiBase = 'https://api.razorpay.com/v1';
+export const UPI_RECIPIENT_ID = 'itssupriyak1@okaxis';
+
+export function createUpiPaymentUri({ amount, orderNumber, transactionReference }) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0
+    || Math.abs(numericAmount * 100 - Math.round(numericAmount * 100)) > 1e-7) {
+    throw new Error('Order amount is invalid');
+  }
+  const parameters = new URLSearchParams({
+    pa: UPI_RECIPIENT_ID,
+    pn: 'TideMarket',
+    am: numericAmount.toFixed(2),
+    cu: 'INR',
+    tn: String(orderNumber || ''),
+    tr: String(transactionReference || '')
+  });
+  return `upi://pay?${parameters.toString()}`;
+}
 
 export function razorpayConfigured() {
   return Boolean(process.env.RAZORPAY_KEY_ID?.startsWith('rzp_test_') && process.env.RAZORPAY_KEY_SECRET);

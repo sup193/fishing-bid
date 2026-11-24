@@ -32,8 +32,9 @@ export function buildMarketTrendPoints({ listings, auctions, bids, orders, start
     addObservation(auction && listingById.get(auction.listing), bid.createdAt, bid.amount, 'auction');
   }
   for (const order of orders) {
-    if (order.paymentStatus !== 'paid' || order.gateway !== 'razorpay' || order.demo) continue;
     const listing = listingById.get(order.listing);
+    if (order.paymentStatus !== 'paid' || !['razorpay', 'upi'].includes(order.gateway)
+      || order.demo || listing?.demo) continue;
     const quantity = Number(order.quantity ?? listing?.quantity);
     const amount = Number(order.amount);
     if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(amount) || amount <= 0) continue;

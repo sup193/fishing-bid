@@ -9,7 +9,7 @@ import path from 'node:path';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, getLatestFishermanRegistrationRequest, consumePendingRegistration, issuePasswordResetOtp, consumePasswordResetOtp, resetPasswordWithToken, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser } from '../db.js';
+import { get, insert, list, update, remove, createAuctionForListing, createBuyoutOrder, createUpiPaymentAttempt, submitUpiPaymentReference, markPaymentPaid as persistPaymentPaid, markPaymentFailed as persistPaymentFailed, transact, uploadFishImage, getPendingRegistration, getLatestFishermanRegistrationRequest, consumePendingRegistration, issuePasswordResetOtp, consumePasswordResetOtp, resetPasswordWithToken, initSupabase, where, sortNewest, sortAmount, sortEnd, sanitizeUser, makeId } from '../db.js';
 import { buildMarketTrendPoints } from '../marketTrends.js';
 import { buildDemandInsights } from '../demandForecast.js';
 import { allow, requireAuth, signUser } from '../auth.js';
@@ -18,10 +18,16 @@ import { getFishermanReputation, getPublicReputationSummaries, isVerifiedPaidOrd
 import { makePricePrediction, normalizePredictionInput } from '../pricePrediction.js';
 import { analyzeAuctionActivity, buildAuctionInsights } from '../auctionInsights.js';
 import { applyAuctionOffer, auctionBidderIds, minimumBidFor, publicAuction, recalculateAuctionOffers } from '../auctionBidding.js';
-import { captureRazorpayPayment, createRazorpayOrder, getRazorpayPayment, razorpayConfigured, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
+import { captureRazorpayPayment, createRazorpayOrder, createUpiPaymentUri, getRazorpayPayment, razorpayConfigured, UPI_RECIPIENT_ID, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from '../payments.js';
 import { sendOtpEmail } from '../emailService.js';
 
 const router = express.Router();
+function fishermanOrderView(order, listing) {
+  const safeOrder = { ...order, verifiedPayment: isVerifiedPaidOrder(order, listing) };
+  delete safeOrder.transactionRef;
+  delete safeOrder.gatewayOrderId;
+  return safeOrder;
+}
 const execFileAsync = promisify(execFile);
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../');
 const upload = multer({
@@ -1083,7 +1089,7 @@ router.get('/fisherman/listings', requireAuth, allow('fisherman'), async (req, r
   const reputations = await getPublicReputationSummaries([req.user.id]);
   res.json(await Promise.all(listings.map(item => listingView(item, reputations.get(req.user.id)))));
 });
-router.get('/fisherman/sales', requireAuth, allow('fisherman'), async (req, res) => { const orders = sortNewest(where(await list('orders'), { fisherman: req.user.id })); const listings = await list('listings'); res.json(orders.map(order => ({ ...order, listingDetails: listings.find(listing => listing.id === order.listing) || null }))); });
+router.get('/fisherman/sales', requireAuth, allow('fisherman'), async (req, res) => { const orders = sortNewest(where(await list('orders'), { fisherman: req.user.id })); const listings = await list('listings'); res.json(orders.map(order => ({ ...fishermanOrderView(order, listings.find(item => item.id === order.listing) || null), listingDetails: listings.find(item => item.id === order.listing) || null }))); });
 router.patch('/listings/:id', requireAuth, allow('fisherman'), async (req, res) => {
   const listing = await get('listings', req.params.id);
   if (!listing || listing.fisherman !== req.user.id) return res.status(404).json({ message: 'Listing not found' });
@@ -1527,7 +1533,7 @@ router.get('/bid-monitoring', requireAuth, allow('fisherman', 'admin'), async (r
     };
   }).sort((a, b) => new Date(b.endTime || 0) - new Date(a.endTime || 0)));
 });
-router.get('/orders', requireAuth, async (req, res) => { const key = req.user.role === 'buyer' ? 'buyer' : req.user.role === 'fisherman' ? 'fisherman' : null; const orders = key ? where(await list('orders'), { [key]: req.user.id }) : await list('orders'); res.json(sortNewest(orders)); });
+router.get('/orders', requireAuth, async (req, res) => { const key = req.user.role === 'buyer' ? 'buyer' : req.user.role === 'fisherman' ? 'fisherman' : null; const orders = key ? where(await list('orders'), { [key]: req.user.id }) : await list('orders'); if (req.user.role !== 'fisherman') return res.json(sortNewest(orders)); const listings = await list('listings'); res.json(sortNewest(orders).map(order => fishermanOrderView(order, listings.find(item => item.id === order.listing) || null))); });
 router.post('/payments/razorpay/webhook', async (req, res) => {
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) return res.status(503).json({ message: 'Razorpay webhook secret is not configured' });
   const signature = req.get('x-razorpay-signature');
@@ -1643,6 +1649,117 @@ router.post('/payments/razorpay/failure', requireAuth, allow('buyer'), async (re
   }
   res.json({ message: 'Payment attempt recorded' });
 });
+router.post('/payments/upi/orders', requireAuth, allow('buyer'), async (req, res) => {
+  let order;
+  if (req.body.orderId) {
+    order = await get('orders', req.body.orderId);
+    if (!order || order.buyer !== req.user.id) return res.status(404).json({ message: 'Order not found' });
+  } else if (req.body.auctionId) {
+    const auction = await get('auctions', req.body.auctionId);
+    if (!auction) return res.status(404).json({ message: 'Auction not found' });
+    const refreshed = await refreshAuction(auction);
+    if (refreshed.status !== 'completed' || refreshed.winner !== req.user.id) {
+      return res.status(403).json({ message: 'Only the winning buyer can checkout this completed bid' });
+    }
+    order = (await list('orders')).find(item => item.auction === auction.id);
+    if (!order) return res.status(404).json({ message: 'Winning order not found' });
+  } else if (req.body.listingId) {
+    const listing = await get('listings', req.body.listingId);
+    if (!listing || listing.saleMode !== 'sale') return res.status(400).json({ message: 'This fish is not available for direct purchase' });
+    const existing = (await list('orders')).find(item => item.listing === listing.id
+      && item.purchaseType === 'buyout' && item.paymentStatus === 'pending');
+    if (existing && existing.buyer !== req.user.id) {
+      return res.status(409).json({ message: 'This fish is currently reserved for another buyer’s payment' });
+    }
+    order = existing || await createBuyoutOrder({ listing, buyerId: req.user.id, address: req.body.address });
+    if (!order) return res.status(409).json({ message: 'This fish is no longer available' });
+  } else {
+    return res.status(400).json({ message: 'Provide a listingId, auctionId, or orderId' });
+  }
+
+  if (typeof req.body.address === 'string' && req.body.address.trim()) {
+    await update('orders', order.id, { address: req.body.address.trim().slice(0, 500) });
+  }
+  const attempt = await createUpiPaymentAttempt({
+    orderId: order.id,
+    buyerId: req.user.id,
+    paymentId: makeId('payment'),
+    upiPaymentReference: `TM${randomUUID().replace(/-/g, '').slice(0, 20).toUpperCase()}`,
+    upiRecipientId: UPI_RECIPIENT_ID,
+    now: new Date().toISOString()
+  });
+  if (attempt.status === 'not_found') return res.status(404).json({ message: 'Order not found' });
+  if (attempt.status === 'already_paid') return res.status(409).json({ message: 'This order has already been paid' });
+  if (attempt.status === 'active_other_payment') {
+    return res.status(409).json({ message: 'Another payment attempt is still active for this order. Check transaction history before retrying.' });
+  }
+  if (attempt.status === 'invalid_amount') return res.status(400).json({ message: 'Order amount is invalid' });
+  if (attempt.status === 'ineligible') return res.status(409).json({ message: 'This order is no longer eligible for payment' });
+  const payment = attempt.payment;
+  if (!payment || !['created', 'existing'].includes(attempt.status)) {
+    return res.status(409).json({ message: 'Could not create a payment attempt for this order' });
+  }
+  const response = {
+    transactionId: payment.id,
+    orderNumber: payment.orderNumber || order.orderNumber,
+    amount: Number(payment.amount),
+    currency: payment.currency || 'INR',
+    upiRecipientId: payment.upiRecipientId || UPI_RECIPIENT_ID,
+    upiPaymentReference: payment.upiPaymentReference,
+    paymentUri: createUpiPaymentUri({
+      amount: payment.amount,
+      orderNumber: payment.orderNumber || order.orderNumber,
+      transactionReference: payment.upiPaymentReference
+    }),
+    status: payment.status,
+    verificationStatus: payment.verificationStatus,
+    referenceSubmittedAt: payment.referenceSubmittedAt || null,
+    upiUtr: payment.upiUtr || null
+  };
+  res.status(attempt.status === 'created' ? 201 : 200).json(response);
+});
+router.post('/payments/upi/submit-reference', requireAuth, allow('buyer'), async (req, res) => {
+  const transactionId = typeof req.body.transactionId === 'string' ? req.body.transactionId : '';
+  const utr = typeof req.body.utr === 'string' ? req.body.utr.trim() : '';
+  if (!transactionId || !/^[a-z\d]{6,40}$/i.test(utr)) {
+    return res.status(400).json({ message: 'Enter a valid UTR/reference between 6 and 40 letters or numbers' });
+  }
+  const result = await submitUpiPaymentReference({
+    transactionId,
+    buyerId: req.user.id,
+    utr,
+    now: new Date().toISOString()
+  });
+  if (result.status === 'not_found') return res.status(404).json({ message: 'Payment attempt not found' });
+  if (result.status === 'invalid_status') return res.status(409).json({ message: 'This payment attempt is no longer awaiting a UTR/reference' });
+  if (result.status === 'duplicate_reference') return res.status(409).json({ message: 'This UTR/reference has already been submitted' });
+  if (result.status === 'invalid_reference') return res.status(400).json({ message: 'Enter a valid UTR/reference' });
+  if (result.status !== 'submitted') return res.status(409).json({ message: 'This payment is no longer eligible for verification' });
+  res.status(202).json({
+    transactionId: result.payment.id,
+    status: result.payment.status,
+    verificationStatus: result.payment.verificationStatus,
+    referenceSubmittedAt: result.payment.referenceSubmittedAt,
+    message: 'Payment reference submitted. Your order will remain unpaid until an administrator verifies the payment.'
+  });
+});
+router.get('/payments/upi/:transactionId/status', requireAuth, allow('buyer'), async (req, res) => {
+  const payment = await get('payments', req.params.transactionId);
+  if (!payment || payment.buyer !== req.user.id || payment.gateway !== 'upi') {
+    return res.status(404).json({ message: 'Payment attempt not found' });
+  }
+  res.json({
+    transactionId: payment.id,
+    orderNumber: payment.orderNumber,
+    amount: Number(payment.amount),
+    status: payment.status,
+    verificationStatus: payment.verificationStatus,
+    referenceSubmittedAt: payment.referenceSubmittedAt || null,
+    upiUtr: payment.upiUtr || null,
+    rejectionReason: payment.rejectionReason || null,
+    paidAt: payment.paidAt || null
+  });
+});
 router.get('/notifications', requireAuth, async (req, res) => {
   const notifications = where(await list('notifications'), { user: req.user.id });
   res.json(sortNewest(notifications).slice(0, 40));
@@ -1660,8 +1777,22 @@ router.get('/transactions', requireAuth, async (req, res) => {
   res.json(await Promise.all(visible.map(async item => {
     const order = await get('orders', item.order);
     const listing = order?.listing ? await get('listings', order.listing) : null;
+    const visiblePayment = { ...item };
+    delete visiblePayment.upiPaymentReference;
+    delete visiblePayment.verifiedBy;
+    const transaction = req.user.role === 'admin'
+      ? item
+      : req.user.role === 'buyer'
+        ? visiblePayment
+        : {
+          ...visiblePayment,
+          upiUtr: undefined,
+          upiRecipientId: undefined,
+          referenceSubmittedAt: undefined,
+          rejectionReason: undefined
+        };
     return {
-      ...item,
+      ...transaction,
       fishType: listing?.fishType || 'Fish order',
       quantity: order?.quantity || 0,
       orderStatus: order?.orderStatus || 'unknown'
@@ -1808,7 +1939,8 @@ router.patch('/orders/:id/delivery-schedule', requireAuth, allow('fisherman'), a
   if (!Number.isFinite(expectedAt) || expectedAt < Date.now() || expectedAt > Date.now() + 90 * 86400000) {
     return res.status(400).json({ message: 'Choose an expected delivery date within the next 90 days' });
   }
-  res.json(await update('orders', order.id, { expectedDeliveryAt: new Date(expectedAt).toISOString() }));
+  const updatedOrder = await update('orders', order.id, { expectedDeliveryAt: new Date(expectedAt).toISOString() });
+  res.json(fishermanOrderView(updatedOrder, listing));
 });
 router.patch('/orders/:id/status', requireAuth, allow('fisherman', 'admin'), async (req, res) => {
   const order = await get('orders', req.params.id);
@@ -1836,6 +1968,10 @@ router.patch('/orders/:id/status', requireAuth, allow('fisherman', 'admin'), asy
   }
   const updatedOrder = await update('orders', order.id, changes);
   if (order.fisherman) await refreshFishermanReputation(order.fisherman);
+  if (req.user.role === 'fisherman') {
+    const listing = await get('listings', order.listing);
+    return res.json(fishermanOrderView(updatedOrder, listing));
+  }
   res.json(updatedOrder);
 });
 router.get('/recommendations', requireAuth, allow('buyer'), async (req, res) => {

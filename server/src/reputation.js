@@ -20,7 +20,7 @@ export function reputationLevel(score) {
 
 export function isVerifiedPaidOrder(order, listing = null) {
   return order?.paymentStatus === 'paid'
-    && order.gateway === 'razorpay'
+    && (order.gateway === 'razorpay' || (order.gateway === 'upi' && order.paymentMethod === 'upi_qr'))
     && typeof order.transactionRef === 'string'
     && order.transactionRef.length > 0
     && !order.demo

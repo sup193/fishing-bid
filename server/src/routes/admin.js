@@ -1,6 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import { get, insert, list, update, transact, where, sortNewest, sanitizeUser, makeId, reviewFishermanRegistration } from '../db.js';
+import { get, insert, list, update, transact, where, sortNewest, sanitizeUser, makeId, reviewFishermanRegistration, reviewUpiPayment } from '../db.js';
 import { allow, requireAuth } from '../auth.js';
 import { getFishermanReputation, listFishermanReputations, refreshFishermanReputation } from '../reputation.js';
 import { evaluatePriceModels, MIN_VERIFIED_SALES_FOR_MODEL, verifiedSaleObservations } from '../pricePrediction.js';
@@ -34,6 +34,60 @@ router.patch('/registration-requests/:id/reject', async (req, res) => {
   if (result.status === 'not_found') return res.status(404).json({ message: 'Pending fisherman registration not found' });
   return res.json({ status: result.status, message: 'Fisherman registration rejected' });
 });
+router.get('/payments/pending', async (req, res) => {
+  const pending = sortNewest((await list('payments')).filter(item =>
+    item.gateway === 'upi' && item.status === 'pending_verification'));
+  const [orders, listings, users] = await Promise.all(['orders', 'listings', 'users'].map(list));
+  const orderById = new Map(orders.map(item => [item.id, item]));
+  const listingById = new Map(listings.map(item => [item.id, item]));
+  const userById = new Map(users.map(item => [item.id, item]));
+  res.json(pending.map(payment => {
+    const order = orderById.get(payment.order);
+    const listing = order?.listing ? listingById.get(order.listing) : null;
+    return {
+      id: payment.id,
+      orderId: payment.order,
+      orderNumber: payment.orderNumber || order?.orderNumber,
+      buyer: sanitizeUser(userById.get(payment.buyer)),
+      fisherman: sanitizeUser(userById.get(payment.fisherman)),
+      fishType: listing?.fishType || 'Fish order',
+      amount: Number(payment.amount),
+      upiRecipientId: payment.upiRecipientId,
+      upiUtr: payment.upiUtr,
+      referenceSubmittedAt: payment.referenceSubmittedAt,
+      status: payment.status,
+      verificationStatus: payment.verificationStatus,
+      demo: Boolean(payment.demo)
+    };
+  }));
+});
+router.patch('/payments/:id/verify', async (req, res) => {
+  const result = await reviewUpiPayment({
+    transactionId: req.params.id,
+    action: 'verify',
+    adminId: req.user.id,
+    now: new Date().toISOString()
+  });
+  if (result.status === 'not_found') return res.status(404).json({ message: 'Pending UPI payment not found' });
+  if (result.status === 'already_reviewed') return res.status(409).json({ message: 'This payment has already been reviewed' });
+  if (result.status !== 'verified') return res.status(409).json({ message: 'Payment or order details are no longer eligible for verification' });
+  if (result.fishermanId) await refreshFishermanReputation(result.fishermanId);
+  res.json({ message: `Payment verified. Order ${result.order.orderNumber} is being processed.`, payment: result.payment });
+});
+router.patch('/payments/:id/reject', async (req, res) => {
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+  const result = await reviewUpiPayment({
+    transactionId: req.params.id,
+    action: 'reject',
+    adminId: req.user.id,
+    reason,
+    now: new Date().toISOString()
+  });
+  if (result.status === 'not_found') return res.status(404).json({ message: 'Pending UPI payment not found' });
+  if (result.status === 'already_reviewed') return res.status(409).json({ message: 'This payment has already been reviewed' });
+  if (result.status !== 'rejected') return res.status(409).json({ message: 'Payment or order details are no longer eligible for rejection' });
+  res.json({ message: `Payment reference rejected for order ${result.order.orderNumber}.`, payment: result.payment });
+});
 router.post('/fishermen', async (req, res) => {
   try {
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
@@ -62,7 +116,7 @@ router.post('/fishermen', async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 });
-router.get('/fishermen/:id', async (req, res) => { const fisherman = await get('users', req.params.id); if (!fisherman || fisherman.role !== 'fisherman') return res.status(404).json({ message: 'Fisherman not found' }); const listings = (await list('listings')).filter(item => item.fisherman === fisherman.id); const auctions = await list('auctions'); const bids = await list('bids'); const orders = (await list('orders')).filter(item => item.fisherman === fisherman.id); const paidOrders = orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay'); const fish = listings.map(listing => { const auction = auctions.find(item => item.listing === listing.id); const fishBids = auction ? bids.filter(item => item.auction === auction.id) : []; const sale = orders.find(item => item.listing === listing.id); const paidSale = paidOrders.find(item => item.listing === listing.id); return { ...listing, auction: auction || null, bids: fishBids.length, highestBid: Math.max(0, ...fishBids.map(item => Number(item.amount || 0))), saleAmount: Number(paidSale?.amount || 0), saleStatus: sale ? `${sale.orderStatus} · payment ${sale.paymentStatus}` : listing.status }; }); res.json({ fisherman: sanitizeUser(fisherman), reputation: await getFishermanReputation(fisherman.id), listings: fish, orders, totalGained: paidOrders.reduce((total, order) => total + Number(order.amount || 0), 0) }); });
+router.get('/fishermen/:id', async (req, res) => { const fisherman = await get('users', req.params.id); if (!fisherman || fisherman.role !== 'fisherman') return res.status(404).json({ message: 'Fisherman not found' }); const listings = (await list('listings')).filter(item => item.fisherman === fisherman.id); const auctions = await list('auctions'); const bids = await list('bids'); const orders = (await list('orders')).filter(item => item.fisherman === fisherman.id); const paidOrders = orders.filter(order => order.paymentStatus === 'paid' && ['razorpay', 'upi'].includes(order.gateway)); const fish = listings.map(listing => { const auction = auctions.find(item => item.listing === listing.id); const fishBids = auction ? bids.filter(item => item.auction === auction.id) : []; const sale = orders.find(item => item.listing === listing.id); const paidSale = paidOrders.find(item => item.listing === listing.id); return { ...listing, auction: auction || null, bids: fishBids.length, highestBid: Math.max(0, ...fishBids.map(item => Number(item.amount || 0))), saleAmount: Number(paidSale?.amount || 0), saleStatus: sale ? `${sale.orderStatus} · payment ${sale.paymentStatus}` : listing.status }; }); res.json({ fisherman: sanitizeUser(fisherman), reputation: await getFishermanReputation(fisherman.id), listings: fish, orders, totalGained: paidOrders.reduce((total, order) => total + Number(order.amount || 0), 0) }); });
 router.get('/reputation', async (req, res) => res.json(await listFishermanReputations()));
 router.get('/reviews', async (req, res) => res.json(sortNewest(await list('reviews'))));
 router.patch('/reviews/:id/moderation', async (req, res) => {
@@ -319,6 +373,6 @@ router.delete('/listings/:id', async (req, res) => {
   });
   res.json({ message: `${listing.fishType || 'Listing'} removed from the marketplace`, listing: removedListing });
 });
-router.get('/overview', async (req, res) => { const [users, listings, auctions, bids, orders] = await Promise.all(['users', 'listings', 'auctions', 'bids', 'orders'].map(list)); const paidTotal = orders.filter(order => order.paymentStatus === 'paid' && order.gateway === 'razorpay').reduce((total, order) => total + Number(order.amount || 0), 0); res.json({ counts: { users: users.length, listings: listings.filter(item => ['available', 'auction'].includes(item.status)).length, auctions: auctions.length, bids: bids.length, orders: orders.length }, paidTotal, recentOrders: sortNewest(orders).slice(0, 8) }); });
+router.get('/overview', async (req, res) => { const [users, listings, auctions, bids, orders] = await Promise.all(['users', 'listings', 'auctions', 'bids', 'orders'].map(list)); const paidTotal = orders.filter(order => order.paymentStatus === 'paid' && ['razorpay', 'upi'].includes(order.gateway)).reduce((total, order) => total + Number(order.amount || 0), 0); res.json({ counts: { users: users.length, listings: listings.filter(item => ['available', 'auction'].includes(item.status)).length, auctions: auctions.length, bids: bids.length, orders: orders.length }, paidTotal, recentOrders: sortNewest(orders).slice(0, 8) }); });
 router.get('/users', async (req, res) => res.json(sortNewest((await list('users')).map(sanitizeUser))));
 export default router;

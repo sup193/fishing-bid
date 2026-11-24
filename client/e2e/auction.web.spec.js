@@ -76,6 +76,6 @@ test('closed auctions disable bids and the winning buyer can open existing check
   const checkoutButton = winnerDetail.getByRole('button', { name: 'Checkout winning bid' });
   await expect(checkoutButton).toBeVisible();
   await checkoutButton.click();
-  await expect(page.getByRole('heading', { name: 'Pay securely with Razorpay.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prepare your UPI payment.' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continue to payment' })).toBeVisible();
 });

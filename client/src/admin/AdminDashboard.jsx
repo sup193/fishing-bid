@@ -185,7 +185,7 @@ export default function AdminDashboard({ initialView = 'fishermen' }) {
         </div>
       </div>)}
       {!requests.length && <p className="empty">No fisherman registrations awaiting approval.</p>}
-    </section> : view === 'bids' ? <BidMonitoring title="Marketplace bid history & review" /> : view === 'transactions' ? <TransactionHistory title="All payment transactions" /> : view === 'demand' ? <DemandForecastPanel role="admin" /> : view === 'auctions' ? <AuctionAnalytics /> : <AdminTrustPricing />}
+    </section> : view === 'bids' ? <BidMonitoring title="Marketplace bid history & review" /> : view === 'transactions' ? <TransactionHistory title="All payment transactions" admin /> : view === 'demand' ? <DemandForecastPanel role="admin" /> : view === 'auctions' ? <AuctionAnalytics /> : <AdminTrustPricing />}
     {showForm && <FishermanForm onClose={() => setShowForm(false)} onCreated={name => { setShowForm(false); setMessage(`${name} can now sign in as a fisherman.`); load(); }} />}
   </main>;
 }
