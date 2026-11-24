@@ -428,7 +428,7 @@ function AuthModal({ mode, onClose, onSwitch, onSubmit, onAuthenticated }) {
     setError('');
     setResending(true);
     try {
-      const result = await api.resendOtp({ email: pending.email });
+      await api.resendOtp({ email: pending.email });
       setSeconds(60);
       setOtp('');
     } catch (err) {

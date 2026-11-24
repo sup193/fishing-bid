@@ -1,4 +1,7 @@
-const API = '/api';
+const API = (
+  import.meta.env.VITE || '/api'
+).replace(/\/$/, '');
+
 const queryString = values => {
   const search = new URLSearchParams(
     Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && value !== '')

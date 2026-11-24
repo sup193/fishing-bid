@@ -35,8 +35,8 @@ async function timedRequest(baseUrl, route, { token, body } = {}) {
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
-  const elapsedMs = performance.now() - start;
   await response.arrayBuffer();
+  const elapsedMs = performance.now() - start;
   return { status: response.status, elapsedMs };
 }
 

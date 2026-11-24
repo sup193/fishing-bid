@@ -1094,12 +1094,14 @@ function CheckoutForm({ type, onClose, onSubmit, onSubmitReference, onStatusChan
   const [submittingReference, setSubmittingReference] = useState(false);
   onStatusChangeRef.current = onStatusChange;
   useDialogAccessibility({ open: true, dialogRef, onClose, focusKey: type });
+  const paymentTransactionId = payment?.transactionId;
+  const paymentStatus = payment?.status;
   useEffect(() => {
-    if (!payment || payment.status !== 'pending_verification') return undefined;
+    if (!paymentTransactionId || paymentStatus !== 'pending_verification') return undefined;
     let active = true;
     const refreshStatus = async () => {
       try {
-        const status = await api.upiPaymentStatus(payment.transactionId);
+        const status = await api.upiPaymentStatus(paymentTransactionId);
         if (!active) return;
         setPayment(current => {
           if (!current) return current;
@@ -1117,7 +1119,7 @@ function CheckoutForm({ type, onClose, onSubmit, onSubmitReference, onStatusChan
       active = false;
       window.clearInterval(interval);
     };
-  }, [payment?.transactionId, payment?.status]);
+  }, [paymentStatus, paymentTransactionId]);
   const submit = async event => {
     event.preventDefault();
     setLoading(true);

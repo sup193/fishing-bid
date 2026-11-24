@@ -58,7 +58,7 @@ export default function DemandForecastPanel({ role, listings = [], onExploreFish
     return points.slice(-30);
   }, [data, period]);
   const maxQuantity = Math.max(1, ...chart.map(point => Number(point.quantityKg) || 0));
-  const species = data?.species || [];
+  const species = useMemo(() => data?.species || [], [data?.species]);
   const options = data?.species || [];
   const availableLocations = data?.locationBreakdown || [];
   const categories = useMemo(() => {

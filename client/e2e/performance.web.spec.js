@@ -13,6 +13,7 @@ test('local guest landing page records browser navigation timing', async ({ page
       transferSizeBytes: entry?.transferSize
     };
   });
+  console.log(`Browser navigation timing: ${JSON.stringify(navigation)}`);
   expect(Number.isFinite(navigation.domContentLoadedMs)).toBe(true);
   await testInfo.attach('browser-navigation-timing.json', {
     body: Buffer.from(JSON.stringify(navigation, null, 2)),
